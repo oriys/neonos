@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -6,6 +7,7 @@ root = Path(__file__).resolve().parents[1]
 spec = spec_from_file_location("scheduling", root / "experiments" / "scheduling.py")
 assert spec and spec.loader
 scheduling = module_from_spec(spec)
+sys.modules[spec.name] = scheduling
 spec.loader.exec_module(scheduling)
 
 Task = scheduling.Task
