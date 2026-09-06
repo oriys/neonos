@@ -17,8 +17,8 @@
 | 名称 | 本课只需要知道 |
 | --- | --- |
 | QEMU | 模拟 RISC-V `virt` 实验机 |
-| OpenSBI | QEMU 中先于 neonos 运行的固件 |
-| `_start` | neonos 的最早入口 |
+| OpenSBI | QEMU 中先于 neonos 运行的固件；当前 runner 用 `-bios default` 让 QEMU 自动加载它 |
+| `_start` | neonos ELF 的入口符号；当前启动链最终从这里开始执行 neonos |
 | `sp` / 栈 | `_start` 先给 Rust 函数准备的工作空间 |
 | UART | 当前实验机用来把字节送到终端的串口设备 |
 
@@ -31,9 +31,9 @@
 ```text
 宿主机 cargo run
   ↓
-QEMU 模拟 RISC-V virt
+QEMU 模拟 RISC-V virt，并加载默认 OpenSBI 与 -kernel 指定的 neonos ELF
   ↓
-OpenSBI
+OpenSBI 先运行，再把控制权交给内核入口
   ↓
 neonos::_start
   ↓ 设置 sp
@@ -43,6 +43,8 @@ rust_main
   ↓
 halt() 持续等待
 ```
+
+这里先建立当前实验配置的心智模型，不把它误记成“所有 RISC-V 机器都必须这样启动”。以后更换 firmware、bootloader 或真实硬件时，启动链可以不同。
 
 现在先做两个预测：
 
@@ -61,13 +63,14 @@ halt() 持续等待
 
 ```text
 target = "riscv64gc-unknown-none-elf"
-runner = [ ... "qemu-system-riscv64" ... "-kernel" ]
+runner = [ ... "qemu-system-riscv64" ... "-bios", "default" ... "-kernel" ]
 ```
 
-先得到两个结论：
+先得到三个结论：
 
 - `cargo build` 默认编译的是 RISC-V 裸机目标，而不是宿主机程序。
 - `cargo run` 构建完成后，把 ELF 交给 QEMU runner，而不是直接在 macOS/Linux 上执行。
+- 当前 runner 明确选择 QEMU 自带的默认 OpenSBI；这就是为什么启动时会先看到 OpenSBI 信息。QEMU 的 RISC-V 文档也说明 `-bios default` 会自动加载默认 OpenSBI，并配合 `-kernel` 提供要启动的内核。
 
 ### 2. `linker.ld`：内核入口叫什么
 
@@ -141,7 +144,7 @@ Hello kernel
 
 随后程序不会自动退出。这不是“卡死”的证据：当前 `rust_main` 最后进入 `halt()`，而 `halt()` 在循环中执行 `wfi`。`wfi` 的精确硬件语义以后再学；这里真正保证控制流不会掉进未知代码的是外层无限循环。
 
-退出 QEMU：先按 `Ctrl-A`，松开，再按 `X`。
+退出 QEMU：按 `Ctrl-A`，松开，再按小写 `x`。在 `-nographic` 默认字符复用器中，这个转义序列表示退出模拟器；如果忘了，也可以先按 `Ctrl-A`、`h` 查看帮助。
 
 如果运行失败，不要先改内核。回到 [第 00 课的环境定位表](00-foundations.md#00j学会记录哪一层坏了)，记录第一条错误属于 Cargo、target、QEMU、链接还是启动路径。
 
@@ -211,7 +214,7 @@ boot.sh 通过
 ### 运行验收
 
 - [ ] `cargo run` 能看到 `Hello kernel` 和自己的新增文字。
-- [ ] 能按 `Ctrl-A`、`X` 正常退出 QEMU。
+- [ ] 能按 `Ctrl-A`、`x` 正常退出 QEMU。
 - [ ] `./tests/boot.sh` 通过。
 
 ### 理解验收
