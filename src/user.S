@@ -1,4 +1,4 @@
-# 第 07 课：最小 U-mode 程序、第一次 sret 入口，以及两类静态栈资源。
+# 第 07～08 课：最小 U-mode 入口、用户程序和两类静态栈资源。
 
 # ---------- 从 S-mode 进入 U-mode ----------
 .section .text.user_enter, "ax"
@@ -21,20 +21,16 @@ enter_user_mode:
     la t0, user_trap_entry
     csrw stvec, t0
 
-    # sscratch 保存可信 trap stack top；用户自己不能通过普通指令修改这个 CSR。
     csrw sscratch, a3
-
-    # sret 会从 sepc 取下一条 PC，并根据 sstatus.SPP 决定返回特权级。
     csrw sepc, a1
     csrw sstatus, a2
 
-    # 保存 user_sp 到 t0；下面会把其他用户可见整数寄存器清成已知初值。
+    # 保存 user_sp 到 t0；随后把用户可见整数寄存器清成已知初值。
     mv t0, a0
 
     mv ra, zero
     mv gp, zero
     mv tp, zero
-    # t0 暂时保留 user_sp
     mv t1, zero
     mv t2, zero
     mv s0, zero
@@ -65,19 +61,15 @@ enter_user_mode:
     # 最后才切用户 sp；此前所有准备工作都使用可信 kernel stack。
     mv sp, t0
     mv t0, zero
-
-    # 这不是普通 ret：CPU 按 sepc/sstatus 完成 S -> U 特权级返回。
     sret
 
-# ---------- 受控用户程序 ----------
+# ---------- 第 07 课：一次 ecall 后停在内核 ----------
 .section .text.user, "ax"
 .balign 4
 .globl user_start
 user_start:
 .globl user_entry
 user_entry:
-    # 第 08 课才会真正把 a7=1 解释成 putchar syscall。
-    # 本课只利用这些值证明用户寄存器确实执行到了 ecall 前。
     li a7, 1
     li a0, 85              # ASCII 'U'
 
@@ -85,13 +77,98 @@ user_entry:
 user_ecall:
     ecall
 
-    # 第 07 课内核不会返回用户。如果这里真的执行，停在明确失败循环。
 .globl user_after_ecall
 user_after_ecall:
     j user_after_ecall
 
 .globl user_end
 user_end:
+
+# ---------- 第 08 课：多次 syscall，真正从内核恢复回用户 ----------
+.balign 4
+.globl user08_start
+user08_start:
+.globl user08_entry
+user08_entry:
+    # 用 callee-saved 寄存器和用户栈中的 sentinel 检查完整 TrapFrame 恢复。
+    li s2, 0x2222333344445555
+    li s3, 0x6666777788889999
+    li t1, 0x1122334455667788
+    sd t1, 0(sp)
+
+    # 1) 未知 syscall：必须返回 -1，并从 ecall 后继续。
+    li a7, 999
+    li a0, 0
+.globl user08_ecall_unknown
+user08_ecall_unknown:
+    ecall
+    li t0, -1
+    bne a0, t0, user08_fail
+
+    # 2) putchar 参数超出 7-bit ASCII：必须返回 -2，不输出字符。
+    li a7, 1
+    li a0, 256
+.globl user08_ecall_invalid
+user08_ecall_invalid:
+    ecall
+    li t0, -2
+    bne a0, t0, user08_fail
+
+    # 两次 trap/sret 后，非返回值寄存器和用户栈内容必须仍然保持。
+    li t0, 0x2222333344445555
+    bne s2, t0, user08_fail
+    li t0, 0x6666777788889999
+    bne s3, t0, user08_fail
+    ld t1, 0(sp)
+    li t0, 0x1122334455667788
+    bne t1, t0, user08_fail
+
+    # 3) 三次合法 putchar。成功路径不做 kernel debug print，最终串口应连续出现 `OK\n`。
+    li a7, 1
+    li a0, 79              # 'O'
+.globl user08_ecall_o
+user08_ecall_o:
+    ecall
+    bnez a0, user08_fail
+
+    li a7, 1
+    li a0, 75              # 'K'
+.globl user08_ecall_k
+user08_ecall_k:
+    ecall
+    bnez a0, user08_fail
+
+    li a7, 1
+    li a0, 10              # newline
+.globl user08_ecall_newline
+user08_ecall_newline:
+    ecall
+    bnez a0, user08_fail
+
+    # 成功 syscall 也必须完整恢复 s2/s3 和用户 stack sentinel。
+    li t0, 0x2222333344445555
+    bne s2, t0, user08_fail
+    li t0, 0x6666777788889999
+    bne s3, t0, user08_fail
+    ld t1, 0(sp)
+    li t0, 0x1122334455667788
+    bne t1, t0, user08_fail
+
+.globl user08_done
+user08_done:
+    # 第 09 课才实现 exit；本课完成后用户程序保持在 U-mode 自旋。
+    j user08_done
+
+user08_fail:
+    # 如果返回值、sepc 或寄存器恢复有任何一项错误，尽量输出一个 `F` 作为负例证据。
+    li a7, 1
+    li a0, 70              # 'F'
+    ecall
+user08_fail_loop:
+    j user08_fail_loop
+
+.globl user08_end
+user08_end:
 
 # ---------- 用户栈：U-mode 的 sp ----------
 .section .bss.user_stack, "aw", @nobits
