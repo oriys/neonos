@@ -48,9 +48,15 @@ jobs:
           # 表示安装前不要先自动更新整个 Homebrew。
           HOMEBREW_NO_AUTO_UPDATE=1 brew install qemu
 
-      # 最后执行真正的端到端启动测试。
+      # 先执行最小端到端启动回归。
       - name: Build and boot kernel
 
         # `tests/boot.sh` 会：编译内核 → 检查 ELF 架构 → 启动 QEMU →
         # 等待串口输出 `Hello kernel`。只有整条链路都成功，这一步才通过。
         run: ./tests/boot.sh
+
+      # 再运行第 01 课自己的 checkpoint。
+      # 它除了看到 Hello kernel，还会检查 OpenSBI→kernel 的输出顺序、
+      # ENTRY(_start)、先设置 sp 再调用 rust_main，以及打印后内核仍停在 halt()。
+      - name: Verify lesson 01 checkpoint
+        run: ./tests/lesson-01.sh
