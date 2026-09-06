@@ -2,55 +2,32 @@
 # 每次 push 或提交 Pull Request 时，GitHub 都会自动创建一台临时机器，
 # 编译并真正启动一次我们的 RISC-V 内核，防止代码改坏后却没有发现。
 
-# 工作流在 GitHub 页面中显示的名字。
 name: CI
 
-# `on` 用来定义“什么时候运行这个工作流”。
 on:
-  # 任何分支收到 push 时运行。
   push:
-
-  # 创建或更新 Pull Request 时也运行。
   pull_request:
 
-# 限制这个 GitHub Actions 工作流拥有的仓库权限。
 permissions:
-  # `contents: read` 表示只允许读取仓库代码，不允许修改仓库内容。
   contents: read
 
-# `jobs` 下面可以定义一个或多个独立任务。
 jobs:
-  # 这个任务的内部名字叫 `boot`，因为它负责验证内核能否真正启动。
   boot:
-    # 让 GitHub 给这个任务分配一台 macOS 26 runner。
     runs-on: macos-26
-
-    # 最长允许运行 10 分钟。
-    # 如果某一步卡死，GitHub 会在超时后主动终止任务，避免一直占用资源。
     timeout-minutes: 10
 
-    # `steps` 表示这个任务要按顺序执行哪些步骤。
     steps:
-      # 使用 GitHub 官方 checkout action，把当前仓库代码下载到 runner 上。
-      # `@v6` 表示使用 actions/checkout 的第 6 个主版本。
       - uses: actions/checkout@v6
 
-      # 给下一步起一个人类容易看懂的名字：安装运行内核所需工具。
       - name: Install prerequisites
-
-        # `run: |` 表示下面缩进的多行内容都是 shell 命令，会按顺序执行。
         run: |
-          # 给 Rust 安装裸机 RISC-V 64 位编译目标。
           rustup target add riscv64gc-unknown-none-elf
-
-          # 用 Homebrew 安装 QEMU。
-          # `HOMEBREW_NO_AUTO_UPDATE=1` 只对这一条命令临时设置环境变量，
-          # 表示安装前不要先自动更新整个 Homebrew。
           HOMEBREW_NO_AUTO_UPDATE=1 brew install qemu
 
-      # 最后执行真正的端到端启动测试。
       - name: Build and boot kernel
-
-        # `tests/boot.sh` 会：编译内核 → 检查 ELF 架构 → 启动 QEMU →
-        # 等待串口输出 `Hello kernel`。只有整条链路都成功，这一步才通过。
         run: ./tests/boot.sh
+
+      # 新增 lesson checkpoint 文件通过 GitHub Contents API 创建时不依赖 executable bit，
+      # 所以显式交给 `/bin/sh` 执行；测试语义与文件权限解耦。
+      - name: Verify lesson 01 checkpoint
+        run: sh ./tests/lesson-01.sh
