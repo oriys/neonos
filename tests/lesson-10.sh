@@ -21,14 +21,15 @@ fail() {
     exit 1
 }
 
-# 先验证实现边界：Faulted 是结构化终态，用户 API 不直接碰 UART。
+# 先验证实现边界：Faulted 是结构化终态，用户 API 不直接碰 UART MMIO。
 grep -Fq 'struct FaultInfo' src/process.rs || fail "FaultInfo is missing"
 grep -Fq 'Faulted(FaultInfo)' src/process.rs || fail "Faulted process state is missing"
 grep -Fq 'fn finish_fault' src/process.rs || fail "Running -> Faulted commit API is missing"
 grep -Fq 'user_api_putchar:' src/user_api.S || fail "user putchar wrapper is missing"
 grep -Fq 'user_api_exit:' src/user_api.S || fail "user exit wrapper is missing"
-if grep -Eq '0x10000000|UART' src/user_api.S; then
-    fail "user API wrapper bypasses syscall boundary"
+# 注释里可以解释 UART；真正禁止的是把 QEMU virt UART MMIO 地址写进用户 wrapper。
+if grep -Eiq '0x0*10000000|0x1000_0000' src/user_api.S; then
+    fail "user API wrapper contains the UART MMIO address"
 fi
 grep -Fq 'call rust_user_trap_dispatch' src/trap.S || fail "user trap entry does not use shared dispatcher"
 
@@ -61,13 +62,11 @@ done
 tr -d '\r' <"$log" >"$clean_log"
 grep -Fq '[stage 02] complete' "$clean_log" || fail "final stage marker missing"
 
-# 第一个真实用户实例必须是受控 illegal instruction fault。
 grep -Eq '^\[user fault\] pid=3 cause=2 sepc=0x[0-9a-fA-F]+ stval=0x[0-9a-fA-F]+$' "$clean_log" \
     || fail "controlled U-mode illegal instruction was not classified as cause 2"
 grep -Fq '[user fault] process=Faulted kernel_alive=true' "$clean_log" \
     || fail "fault did not commit Faulted after returning to management"
 
-# fault 之后第二个用户程序必须真的运行并通过 syscall wrapper 输出整行。
 grep -Fxq 'AFTER_FAULT_OK' "$clean_log" || fail "post-fault user program did not complete its output"
 grep -Fq '[user fault] pid=4 process=Exited(0)' "$clean_log" \
     || fail "post-fault user process did not exit normally"
@@ -79,11 +78,9 @@ if grep -Fq '[panic]' "$clean_log"; then
     fail "kernel panicked while isolating a user fault"
 fi
 
-# 最终 marker 后内核停在 S-mode 管理路径，应仍存活。
 sleep 0.2
 kill -0 "$pid" 2>/dev/null || fail "kernel did not remain alive after stage 02"
 
-# 历史默认构建仍必须成立。
 cargo build
 
 echo "lesson-10 checkpoint passed"
