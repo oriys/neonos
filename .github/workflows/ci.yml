@@ -44,9 +44,9 @@ jobs:
           rustup target add riscv64gc-unknown-none-elf
 
           # 用 Homebrew 安装 QEMU。
-          # `HOMEBREW_NO_AUTO_UPDATE=1` 表示这次安装前不要先自动更新整个 Homebrew，
-          # 可以减少 CI 中不必要的等待时间和外部变化。
-          brew install qemu
+          # `HOMEBREW_NO_AUTO_UPDATE=1` 只对这一条命令临时设置环境变量，
+          # 表示安装前不要先自动更新整个 Homebrew。
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install qemu
 
       # 最后执行真正的端到端启动测试。
       - name: Build and boot kernel
