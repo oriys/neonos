@@ -53,3 +53,6 @@ jobs:
 
       - name: Verify lesson 10 checkpoint
         run: sh ./tests/lesson-10.sh
+
+      - name: Verify lesson 11 checkpoint
+        run: sh ./tests/lesson-11.sh
