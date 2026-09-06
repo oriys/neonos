@@ -85,6 +85,7 @@ Process
 
 ```text
 07 → 用户栈 / trap 栈 / 用户现场
+10 → Faulted 终态与故障信息
 21 → 地址空间
 27 → fd
 ...
@@ -110,22 +111,23 @@ TrapFrame
 
 ## 本课新增一个 Rust 概念：enum 状态
 
-用 `enum` 表示互斥状态，例如：
+用 `enum` 表示互斥状态。本课只定义当前真的会发生的三个状态：
 
 ```text
 Ready
 Running
 Exited(code)
-Faulted(cause)
 ```
 
-本课真正模拟：
+本课模拟：
 
 ```text
 Ready → Running → Exited(0)
 ```
 
-`Faulted` 先保留为下一课组会真正使用的终态概念；`Blocked` 还不加入正式状态机，因为现在没有任何等待 I/O/锁的机制。
+为什么现在不加 `Faulted`？因为第 06 课还没有运行真实用户代码，也没有用户 fault。第 10 课第一次真正需要“用户错误终止”时再加入 `Faulted(info)`。`Blocked` 也暂时不加入，因为现在没有任何等待 I/O/锁的机制。
+
+这正好实践一个设计原则：**状态机不是一次猜全，而是随着真实行为出现再扩展。**
 
 ## 分步实验
 
@@ -145,14 +147,12 @@ process.state = ...
 
 设计一个统一转换入口，让非法转换能返回错误。
 
-本课规则例如：
+本课规则：
 
 ```text
 Ready   → Running      合法
 Running → Exited(code) 合法
-Running → Faulted(...) 合法（只做模型准备）
 Exited  → Running      非法
-Faulted → Running      非法
 ```
 
 如果要再次运行同一程序，应创建/重置成**新的进程实例**，而不是把旧的 `Exited` 强行改回 `Running`。
@@ -214,6 +214,7 @@ Exited(0) → Running
 - 用户栈；
 - `sret`；
 - `fork`；
+- `Faulted`；
 - PID 回收策略；
 - 堆分配。
 
@@ -237,6 +238,7 @@ Exited(0) → Running
 3. Process 和 TrapFrame 的生命周期为什么不同？
 4. 为什么第二次运行同一 Program 不应该简单“复活”旧 Exited 实例？
 5. 为什么现在不需要 Ready queue？
+6. 为什么 `Faulted` 要等第 10 课真正出现用户 fault 时再加入？
 
 ## 这一课结束后，下一问题自然出现了
 
