@@ -35,3 +35,6 @@ jobs:
 
       - name: Verify lesson 04 checkpoint
         run: sh ./tests/lesson-04.sh
+
+      - name: Verify lesson 05 checkpoint
+        run: sh ./tests/lesson-05.sh

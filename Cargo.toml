@@ -4,16 +4,15 @@ name = "neonos"
 version = "0.1.0"
 edition = "2024"
 
-# 教学测试 feature 默认全部关闭；正常内核不会故意 panic，也不会跳过 BSS 初始化。
+# 教学测试 feature 默认全部关闭；正常内核只保留已经学会的能力，不主动制造故障。
 [features]
 default = []
 lesson03-panic = []
-
-# 第 04 课：在最早启动阶段先把一个 BSS probe 写成非零，再观察清零结果。
 lesson04-bss-probe = []
-
-# 仅用于第 04 课的负例：故意跳过普通 BSS 清零，证明 probe 会保留非零模式。
 lesson04-skip-bss-clear = []
+
+# 第 05 课：安装 stvec 后调用独立汇编触发器，制造一次受控非法指令异常。
+lesson05-illegal-trap = []
 
 [profile.dev]
 panic = "abort"
