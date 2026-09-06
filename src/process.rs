@@ -1,12 +1,12 @@
-// 第 06～07 课的最小 Program / Process 数据模型。
+// 第 06～09 课的最小 Program / Process 数据模型。
 //
-// 第 06 课只有：Program、PID、Ready/Running/Exited。
-// 第 07 课第一次真正需要用户栈、trap 栈和持久用户现场，所以这些字段现在才加入。
+// 第 06 课只有 Program、PID、Ready/Running/Exited。
+// 第 07 课第一次真正需要用户栈、trap 栈和持久用户现场。
+// 第 09 课第一次让管理流程在 run_user 返回后把 Running 正式提交成 Exited(code)。
 
 use core::arch::global_asm;
 use core::ptr::addr_of;
 
-// 第 06 课用的“只描述、不执行”的受控链接代码。
 global_asm!(
     r#"
     .section .text.model_program, "ax"
@@ -28,7 +28,6 @@ unsafe extern "C" {
     static model_hello_end: u8;
 }
 
-// Program 只描述稳定代码，不保存“某次运行”的状态。
 pub(crate) struct Program {
     name: &'static str,
     entry: usize,
@@ -68,7 +67,6 @@ impl Program {
     }
 
     fn linked_hello() -> Self {
-        // SAFETY: 三个符号由本文件的汇编片段导出；这里只取得地址。
         let (code_start, entry, code_end) = unsafe {
             (
                 addr_of!(model_hello_start) as usize,
@@ -96,7 +94,6 @@ impl Program {
     }
 }
 
-// 本阶段仍只保留真实出现的三个状态。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessState {
     Ready,
@@ -110,7 +107,6 @@ struct InvalidTransition {
     to: ProcessState,
 }
 
-// 统一半开区间。第 07 课用它描述用户栈和可信 trap 栈。
 #[derive(Clone, Copy)]
 pub(crate) struct AddressRange {
     pub(crate) start: usize,
@@ -138,8 +134,6 @@ impl AddressRange {
     }
 }
 
-// 第 07 课第一次需要“将来要交给 CPU 的用户寄存器初值”。
-// 这里不放 scause/stval，因为那是 trap 发生后才产生的事实。
 #[derive(Clone, Copy)]
 pub(crate) struct UserContext {
     pub(crate) x: [usize; 32],
@@ -159,7 +153,6 @@ impl UserContext {
     }
 }
 
-// 这些资源到第 07 课才真实存在，所以通过 Option 挂到 Process 上。
 #[derive(Clone, Copy)]
 pub(crate) struct UserRuntime {
     pub(crate) user_stack: AddressRange,
@@ -207,6 +200,14 @@ impl<'program> Process<'program> {
     pub(crate) fn start(&mut self) {
         if self.transition(ProcessState::Running).is_err() {
             panic!("process {} cannot transition to Running", self.id);
+        }
+    }
+
+    // 第 09 课只有在有效 exit 已经让 run_user 回到管理栈以后才调用这里。
+    // 因而“状态进入 Exited”和“已经不会再恢复那个用户现场”是一致的提交点。
+    pub(crate) fn finish_exit(&mut self, code: u8) {
+        if self.transition(ProcessState::Exited(code as i32)).is_err() {
+            panic!("process {} cannot transition Running -> Exited", self.id);
         }
     }
 
@@ -274,7 +275,6 @@ fn state_name(state: ProcessState) -> &'static str {
     }
 }
 
-// 第 06 课模型仍保持原输出；返回下一个未使用 PID，供第 07 课真实实例继续使用。
 pub(crate) fn run_lesson06_model() -> u64 {
     let program = Program::linked_hello();
     crate::println!(
