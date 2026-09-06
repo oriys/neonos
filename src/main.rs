@@ -7,8 +7,6 @@ mod memory;
 mod trap;
 mod process;
 mod user;
-
-// 第 08 课第一次把用户 a7/a0 真正解释成 syscall ABI。
 mod syscall;
 
 use core::arch::{asm, global_asm};
@@ -80,23 +78,25 @@ pub extern "C" fn rust_main() -> ! {
     #[cfg(feature = "lesson05-illegal-trap")]
     trap::trigger_lesson05();
 
-    // 第 06 课模型先运行，下一课真实 Process 继续使用下一个 PID。
+    // 第 06 课模型返回 pid=3 作为第一个真实用户实例 ID。
     let _next_pid = process::run_lesson06_model();
 
-    // 早期故障实验仍然保持独立。
     #[cfg(feature = "lesson03-panic")]
     {
         lesson03_deliberate_panic();
         crate::println!("SHOULD_NOT_REACH");
     }
 
-    // 第 07 课：只证明一次 S -> U -> S，trap 后不返回用户。
     #[cfg(feature = "lesson07-user-mode")]
     user::run_lesson07(_next_pid);
 
-    // 第 08 课：syscall handler 修改 TrapFrame，汇编恢复用户现场并多次 sret 返回。
     #[cfg(feature = "lesson08-syscalls")]
     user::run_lesson08(_next_pid);
+
+    // 第 09 课：run_user 可以通过有效 exit 恢复原 KernelContext，
+    // Rust 管理流程随后提交 Process=Exited、清理栈，并顺序重复运行 100 次。
+    #[cfg(feature = "lesson09-exit")]
+    user::run_lesson09(_next_pid);
 
     halt()
 }
