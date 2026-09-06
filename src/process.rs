@@ -1,8 +1,6 @@
-// 第 06～09 课的最小 Program / Process 数据模型。
+// 第 06～10 课的 Program / Process 数据模型。
 //
-// 第 06 课只有 Program、PID、Ready/Running/Exited。
-// 第 07 课第一次真正需要用户栈、trap 栈和持久用户现场。
-// 第 09 课第一次让管理流程在 run_user 返回后把 Running 正式提交成 Exited(code)。
+// 第 10 课第一次真正出现用户 fault，所以 `Faulted(FaultInfo)` 到现在才加入状态机。
 
 use core::arch::global_asm;
 use core::ptr::addr_of;
@@ -95,10 +93,18 @@ impl Program {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FaultInfo {
+    pub(crate) cause: usize,
+    pub(crate) sepc: usize,
+    pub(crate) stval: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessState {
     Ready,
     Running,
     Exited(i32),
+    Faulted(FaultInfo),
 }
 
 #[derive(Clone, Copy)]
@@ -184,6 +190,7 @@ impl<'program> Process<'program> {
             (current, next),
             (ProcessState::Ready, ProcessState::Running)
                 | (ProcessState::Running, ProcessState::Exited(_))
+                | (ProcessState::Running, ProcessState::Faulted(_))
         );
 
         if !allowed {
@@ -203,11 +210,15 @@ impl<'program> Process<'program> {
         }
     }
 
-    // 第 09 课只有在有效 exit 已经让 run_user 回到管理栈以后才调用这里。
-    // 因而“状态进入 Exited”和“已经不会再恢复那个用户现场”是一致的提交点。
     pub(crate) fn finish_exit(&mut self, code: u8) {
         if self.transition(ProcessState::Exited(code as i32)).is_err() {
             panic!("process {} cannot transition Running -> Exited", self.id);
+        }
+    }
+
+    pub(crate) fn finish_fault(&mut self, info: FaultInfo) {
+        if self.transition(ProcessState::Faulted(info)).is_err() {
+            panic!("process {} cannot transition Running -> Faulted", self.id);
         }
     }
 
@@ -264,6 +275,13 @@ fn print_state(process: &Process<'_>) {
         ProcessState::Exited(code) => {
             crate::println!("[model] pid={} Exited({})", process.id, code)
         }
+        ProcessState::Faulted(info) => crate::println!(
+            "[model] pid={} Faulted(cause={},sepc={:#x},stval={:#x})",
+            process.id,
+            info.cause,
+            info.sepc,
+            info.stval
+        ),
     }
 }
 
@@ -272,6 +290,7 @@ fn state_name(state: ProcessState) -> &'static str {
         ProcessState::Ready => "Ready",
         ProcessState::Running => "Running",
         ProcessState::Exited(_) => "Exited",
+        ProcessState::Faulted(_) => "Faulted",
     }
 }
 
