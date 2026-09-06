@@ -2,63 +2,191 @@
 
 状态：课程已安排，学习待开始。入口：[总路线](README.md) · [进度记录](progress.md)。
 
-目标：实现物理页分配、简单内核堆和 Sv39 分页，让两个进程在相同虚拟地址保存不同内容；非法访问可诊断，系统调用能验证用户缓冲区。
+目标：从“所有任务共享同一个物理地址世界”走到完整的教学版 Sv39 隔离：物理 frame 有明确所有权，内核有可控 heap，页表能软件验证并真正启用，进程 root 可切换，用户非法访问可诊断，syscall user pointer 通过统一 copy 接口验证。
 
-阅读对应 [OSTEP 官方章节](https://pages.cs.wisc.edu/~remzi/OSTEP/) 第 13～22 章。分段、TLB 和页面替换穿插图解或模拟；真实磁盘换页留到后续。RISC-V 页表结构按 [Supervisor 规范](https://riscv.github.io/riscv-unified-db/manual/html/isa/isa_20240411/chapters/supervisor.html) 查询，不套用书中其他架构的位定义。
+阅读 OSTEP 第 13～22 章；分段、TLB、页面替换通过图解/模拟学习。RISC-V PTE、`satp`、`sfence.vma`、page-fault cause 只以 [Supervisor 规范](https://docs.riscv.org/reference/isa/priv/supervisor.html) 为架构依据，不套用 x86 位定义。
 
 ## 开始前检查
 
-先完成 [第三阶段总验收](stage-03.md)：多任务现场保存正确，定时抢占、退出和故障路径稳定。还需要第一阶段准确的段边界和 BSS 初始化。本阶段先关闭定时器调试内存基础，再在地址空间切换完成后恢复抢占。
+先完成 [第三阶段总验收](stage-03.md)：多任务 persistent context、Ready queue、timer 抢占和调度边界稳定。
 
-教材准备和代码实现分别记录，当前课程均待开始。
+还要保留第一阶段真实 linker section/stack 边界。本阶段前半关闭 timer/用户派发调试内存基础；第 21 课地址空间切换稳定后再恢复 yield/RR/MLFQ 回归。
 
 ## 14 次学习安排
 
-每次 45～60 分钟，每周 2～3 次，约 5～7 周；分页调试可继续拆分。这是学习顺序，不是日历预约。
-
-| 次数 | 课程 | 当次任务 | 当次成果 |
+| 次数 | 课程 | 当次问题 | 当次成果 |
 | --- | --- | --- | --- |
-| 1 | [16 地址与内存地图](16-addresses.md) | 物理地址、虚拟地址、页与偏移 | 手算地址转换并画出规划 |
-| 2 | [17A 物理页分配](17-frames.md) | RAM 与预留区、页状态 | 只从可用页分配 |
-| 3 | [17B 页回收](17-frames.md) | 耗尽、释放、重用与清零 | 错误释放被拒绝，统计可核对 |
-| 4 | [18A 简单内核堆](18-heap.md) | 对齐、空闲块与分配 | 按大小和对齐申请内存 |
-| 5 | [18B 堆回收](18-heap.md) | 分割、合并、碎片 | 释放后可重新获得大块空间 |
-| 6 | [19A 页表结构](19-page-tables.md) | Sv39 位分解与 PTE | 手工沿三级表找到物理页 |
-| 7 | [19B 页表操作](19-page-tables.md) | 映射、查询、撤销与失败回滚 | 软件页表检查正确 |
-| 8 | [20A 内核映射](20-paging.md) | 代码、栈、UART、页表内存 | 启用前检查全部必需映射 |
-| 9 | [20B 开启分页](20-paging.md) | `satp`、转换同步、诊断 | 分页后内核继续运行 |
-| 10 | [21A 进程地址空间](21-address-spaces.md) | 私有页、用户代码、权限 | 相同用户地址对应不同物理页 |
-| 11 | [21B 地址空间切换](21-address-spaces.md) | 调度切换与安全回收 | 抢占后私有数据仍正确 |
-| 12 | [22A 缺页诊断](22-page-faults.md) | 取指、读、写权限错误 | 用户错误终止，内核继续 |
-| 13 | [22B 用户缓冲区](22-page-faults.md) | 跨页验证和安全复制 | 非法指针返回错误而非破坏内核 |
-| 14 | [23 TLB 与页面替换](23-vm-simulation.md) | 模拟 TLB、FIFO、LRU、OPT | 区分缓存未命中与缺页，完成对比 |
+| 1 | [16 地址与内存地图](16-addresses.md) | VA/PA/page/offset 到底是什么 | 4 KiB 边界手算、地址类型和物理/虚拟两张图 |
+| 2 | [17A 物理 frame](17-frames.md) | 哪些 RAM 页真的能分 | 默认 Reserved、证明 Free、唯一分配 |
+| 3 | [17B 所有权/回收](17-frames.md) | 什么时候一页才允许重新用 | 耗尽、非法 free、zero-on-alloc、计数守恒 |
+| 4 | [18A heap 分配](18-heap.md) | 小对象如何满足 size/alignment | first-fit + prefix/suffix，失败无副作用 |
+| 5 | [18B heap 回收](18-heap.md) | 碎片与合并怎样发生 | handle free、相邻合并、external fragmentation |
+| 6 | [19A Sv39 结构](19-page-tables.md) | VA 怎样走三级 PTE | VPN[2:0]、canonical、leaf/non-leaf 手算 |
+| 7 | [19B 页表操作](19-page-tables.md) | map/unmap 失败如何保持所有权 | map/translate/unmap、回滚、table-frame 生命周期 |
+| 8 | [20A kernel root](20-paging.md) | 启用分页前必须映射什么 | 权限最小化、PC/sp/stvec/UART software preflight |
+| 9 | [20B 开启 Sv39](20-paging.md) | 写 satp 后怎样保证还能执行 | root PPN、`sfence.vma`、satp 读回、安全负例 |
+| 10 | [21A Process AddressSpace](21-address-spaces.md) | 同 VA 如何映射不同数据 | 独立 root/user frames、kernel borrowed mappings |
+| 11 | [21B root 切换/销毁](21-address-spaces.md) | TLB 与 frame 生命周期怎样安全切换 | ASID=0 全 flush、safe root 后 destroy、资源守恒 |
+| 12 | [22A page fault](22-page-faults.md) | 非法取指/读/写怎样分类 | cause 12/13/15、user/kernel fault 分流 |
+| 13 | [22B user copy](22-page-faults.md) | syscall 怎样安全读用户指针 | checked range、canonical/U/R(W)/ownership、跨页 copy |
+| 14 | [23 TLB 与 replacement](23-vm-simulation.md) | TLB miss/page fault/swap 怎么分层 | TLB 模拟、Belady anomaly、FIFO/LRU/OPT 对比 |
 
-## 共同实现选择
+## 本阶段共同设计
 
-保持单核、最多 4 个已知用户任务，只实现 4 KiB 页。基础阶段使用物理页分配器；堆使用单独预留的固定 arena，页表元数据不依赖堆。第 18 课先提供显式分配接口，接入 `GlobalAlloc` 和大规模使用 `Box`、`Vec` 可作为后续补课。
+### 只做 4 KiB 页
 
-第一版采用低地址用户空间和内核恒等映射。每个进程根页表包含相同的内核映射，内核页均为 U=0；用户代码和数据通过 U=1 的独立低地址映射访问。陷入后先在当前根页表下执行共同的内核映射，避免同时引入跳板页和两套内核地址布局。
+不实现 huge page、真实 swap、demand paging 或 COW。第 19 课如果 software walker 遇到 level-1/2 leaf，当前教学实现明确报告“不支持的大页”。
 
-页表树先不共享表页：每个根的表页由自己持有，内核代码等物理页可由多个根映射为内核专用。共享物理映射不表示拥有物理页，退出时只释放该进程真正拥有的页。所有内核根必须映射调度栈、陷入栈、入口和分配器需要访问的 RAM。
+### 三种所有权必须始终分开
 
-用户虚拟布局示例：代码从 `0x00400000` 开始，私有数据页在 `0x01000000`，用户栈顶 `0x40000000`，栈下留一页不映射的保护区。这些是虚拟地址；内核 UART 恒等映射位于 `0x10000000`，用户区域须避开它。代码长度与栈范围仍须验证。
+```text
+frame allocator
+  → 物理页是否 Reserved/Free/Allocated
 
-所有切换先使用 ASID=0，并执行完整本地地址转换同步；优化与多核 TLB 同步留到后续。用户程序仍是整数汇编样例，迁移到低地址时必须核对可重定位性，不能直接把原内核中的任意函数搬过去。
+PageTable/AddressSpace
+  → 自己拥有哪些 table/user frames
+
+mapping
+  → 某个 VA 能否访问某个 PPN + permissions
+```
+
+`unmap` 不自动等于 `free`；共享 kernel mapping 不等于每个 Process 都拥有 kernel physical frame。
+
+### kernel 与 user mapping
+
+第一版：
+
+```text
+kernel identity mapping → U=0
+user code               → R-X,U=1
+user data/stack         → RW-,U=1
+stack guard              → unmapped
+```
+
+禁止 user W+X。
+
+课程保持：
+
+```text
+SUM=0
+MXR=0
+```
+
+内核不直接随意 dereference user VA。用户数据统一通过 `user_copy` software walk → trusted kernel RAM mapping 访问。
+
+### 共享 kernel path 必须存在于每个 root
+
+每个 Process root 都映射：
+
+- kernel code/data；
+- trap entry/当前 task trap stack；
+- scheduler/management stack；
+- page-table/frame allocator 需要的 RAM；
+- console/UART。
+
+这样 U→S trap 时可以直接在当前 root 下执行可信内核代码。
+
+### ASID=0
+
+本阶段所有 root 使用 ASID=0。每次地址空间切换：
+
+```text
+write satp(new root)
+→ sfence.vma x0,x0
+```
+
+单 hart 下简单正确；ASID 优化和多核 TLB shootdown 留到进阶。
+
+### user virtual layout
+
+示例：
+
+```text
+code       0x0040_0000
+private data 0x0100_0000
+stack top  0x4000_0000
+guard      stack 下 1 页 unmapped
+```
+
+地址只是课程虚拟布局，不是物理 RAM 位置。UART `0x1000_0000` 是 kernel U=0 MMIO mapping，user VA 规划避开它。
 
 ## 计划产物
 
-按实际目录组织新增 `src/memory/frame.rs`、`heap.rs`、`page_table.rs`、`address_space.rs`、`user_copy.rs`；若已有 `src/memory.rs`，保留其为父模块并声明子模块，避免同时新增冲突的 `src/memory/mod.rs`。另计划新增 `experiments/vm.py` 和 `tests/memory.sh`。
+```text
+src/memory/frame.rs
+src/memory/heap.rs
+src/memory/page_table.rs
+src/memory/address_space.rs
+src/memory/user_copy.rs
+experiments/vm.py
+tests/memory.sh
+```
 
-## 总验收
+如果已有 `src/memory.rs`，作为父模块声明子模块；不要同时创建冲突的 `memory.rs` 和 `memory/mod.rs` 结构。
 
-- [ ] 页分配不碰预留区域，耗尽和非法释放有明确结果。
-- [ ] 堆满足大小与对齐要求，分割和合并可复现。
-- [ ] 页表查询、权限与映射边界符合规划。
-- [ ] 分页后启动、输出、用户系统调用与定时抢占正常。
-- [ ] 两进程同一用户地址的数据互不干扰，退出回收不破坏其他进程。
-- [ ] 非法取指、读写和栈保护页访问产生可解释的报告。
-- [ ] 用户缓冲区验证覆盖跨页、权限、溢出与长度限制。
-- [ ] 能区分 TLB 未命中、页表权限错误与磁盘换页。
-- [ ] 已有检查和新增内存检查通过，记录真实结果。
+## 阶段测试原则
 
-下一步进入 [第五阶段](stage-05.md)，利用独立地址空间实现 `exec`、`wait`、简化 `fork`、管道和 shell。
+`tests/memory.sh` 不能只看 `paging enabled`。至少覆盖：
+
+- frame allocator Reserved/Free/Allocated 计数；
+- heap split/coalesce/failure；
+- software page-table map/rollback；
+- `satp` 启用标记；
+- dedicated kernel page-fault 负例（独立模式）；
+- A/B same VA different PPN/data；
+- root switch 多轮无 stale translation；
+- instruction/load/store user page fault；
+- `write_buf` 跨页/坏第二页/zero length/overflow；
+- 最终资源 baseline；
+- 旧 boot/user/scheduling 回归。
+
+## 阶段总验收
+
+### 物理内存
+
+- [ ] 不确定的 RAM 默认 Reserved，allocator 不碰 kernel/stack/FDT/MMIO。
+- [ ] alloc/free/zero/reuse/计数守恒可验证。
+- [ ] heap 对齐、失败原子性、合并与碎片实验通过。
+
+### 页表/分页
+
+- [ ] Sv39 VPN/canonical/PTE leaf/non-leaf 能手算。
+- [ ] map failure 回滚，translate 不分配，unmap 不擅自 free data frame。
+- [ ] kernel root 权限不是 broad RWX，`satp`/`sfence` 规则正确。
+- [ ] 分页开启后 code/data/stack/trap/UART/allocator 全部正常。
+
+### 隔离/user copy
+
+- [ ] A/B 相同 user VA → 不同 PPN，实际用户数据互不干扰。
+- [ ] AddressSpace build/destroy 只回收 Owned frames，重复生命周期无泄漏。
+- [ ] user page-fault cause 12/13/15 可解释，kernel fault 仍停机。
+- [ ] user-copy 检查 canonical、权限、归属、跨页、溢出，坏指针返回错误不打坏内核。
+- [ ] `SUM=0/MXR=0` 基线保持。
+
+### 模型理解
+
+- [ ] 能区分 TLB miss、page-table permission failure、模拟 page replacement。
+- [ ] FIFO 3-frame/4-frame Belady anomaly 可手算。
+- [ ] 明确当前 neonos 没有 swap/backing-store metadata。
+
+进入第五阶段前，应该能画完整链：
+
+```text
+Process
+→ AddressSpace/root
+→ VA
+→ TLB / page table
+→ PPN
+→ frame ownership
+```
+
+以及 syscall user pointer：
+
+```text
+user VA range
+→ validation + page walk
+→ trusted kernel copy
+→ syscall side effect
+```
+
+通过后进入 [第五阶段：从进程接口到小 shell](stage-05.md)。
