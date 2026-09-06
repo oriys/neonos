@@ -6,10 +6,10 @@
 
 ## 从这里开始
 
-- 完全零基础：先完成 [第 00 课：开始之前，先认识这台“电脑”](00-foundations.md)。它只建立 CPU、寄存器、地址、ABI、Rust 裸机、ELF/QEMU/OpenSBI 的最小概念地图，不要求先学完整门课。
+- 完全零基础：先完成 [第 00 课：开始之前，先认识这台“电脑”](00-foundations.md)。它只建立 CPU、地址、寄存器、ABI、Rust 裸机、ELF/QEMU/OpenSBI 的最小概念地图，不要求先学完整门课。
 - 当前工程基础：仓库已有 `Hello kernel` 启动实现及启动检查脚本；这表示代码基础已具备，不代表相关课程已经掌握。
 - 当前正式课程：**第 01 课，待开始**。入口：[从开机到 Hello kernel](01-boot.md)。
-- 学习记录：[进度与复盘](progress.md)。代码存在、助手完成实现、学习者完成课程，是三种不同状态。
+- 学习记录：[进度与复盘](progress.md)。代码存在、教材准备、学习者完成课程，是不同状态。
 
 ## 课程阶段
 
@@ -23,7 +23,7 @@
 | E 进程接口 | 24～28 | exec、wait、fork、pipe、shell | [stage-05.md](stage-05.md) |
 | F 并发 | 29～35 | race、thread、atomic、mutex、condvar、semaphore、deadlock | [stage-06.md](stage-06.md) |
 | G 持久化 | 36～43 | virtio-blk、cache、文件系统、inode、目录、文件 API | [stage-07.md](stage-07.md) |
-| H 崩溃恢复 | 44～47 | crash consistency、fsck、journal、recovery | [stage-08.md](stage-08.md) |
+| H 崩溃恢复 | 44～47 | crash consistency、fsck、full-block redo journal、recovery | [stage-08.md](stage-08.md) · [统一协议](stage-08-protocol.md) |
 
 ## 建议节奏
 
@@ -43,16 +43,15 @@
 
 1. **今天要解决什么问题**：先知道当前内核缺什么能力。
 2. **只引入本课需要的新词**：复杂概念第一次出现时按需解释。
-3. **先画图、先预测**：先说你认为会发生什么。
-4. **阅读现有代码**：第一次遇到汇编、裸指针、CSR 或设备寄存器时逐条解释。
-5. **做最小修改**：一次只引入一个新变量。
-6. **运行并观察**：比较预测和实际结果。
-7. **故意做错一个受控场景**：错误处理不能只靠 happy path。
-8. **恢复正常路径并回归**：临时触发代码不能留在默认启动路径。
-9. **写下为什么**：记录真实输出、解释和未解决问题。
-10. **明确下一课为什么自然出现**：上一课留下的限制，就是下一课的问题来源。
+3. **先预测**：先写下自己认为会发生什么。
+4. **读真实代码/规范证据**：不靠“教材说应该这样”。
+5. **只改一个层次**：减少同时变化的变量。
+6. **运行并观察**：保存真实输出。
+7. **故意制造一个失败**：确认错误路径也可解释。
+8. **恢复正常实现并跑回归**。
+9. **回答理解题**：能用自己的话解释才算完成。
 
-Rust 的所有权、引用、trait、宏、原子类型随实验补充，不要求先学完整 Rust。RISC-V 指令、CSR、页表位和 VirtIO 字段以对应官方规范为准，不靠记忆猜数值。
+Rust 的引用、裸指针、trait、宏、所有权随实验补充。第一次遇到汇编，逐条解释寄存器、指令、ABI 和保存顺序。新功能开始前先确认上一课 checkpoint 正常。
 
 ## 第一轮边界
 
@@ -60,136 +59,154 @@ Rust 的所有权、引用、trait、宏、原子类型随实验补充，不要�
 
 ```text
 QEMU virt
-单核 RISC-V
+RISC-V RV64
+单 hart
 OpenSBI
 串口交互
-固定容量为主的数据结构
-4 KiB Sv39 页
-最多少量教学进程/线程
-自定义文件系统
-自定义用户 ABI
+固定容量资源为主
 ```
 
-第一轮明确不追求：POSIX/Linux 二进制兼容、多核、真实 swap、完整 ELF 动态加载、信号、网络、生产级文件系统、任意掉电保证。
+用户程序最初内嵌在 kernel image 中；文件系统完成后再从 disk file 加载受控 NEX1 程序。
 
 完成后应能演示：
 
-- 从 OpenSBI 进入 `_start` 和 Rust 内核。
-- 用户程序通过系统调用运行、退出和发生受控错误。
-- 多个任务主动或被定时抢占切换。
-- 独立 Sv39 地址空间隔离进程用户内存。
-- fork/exec/wait、pipe 和用户态 shell。
-- 线程、互斥、条件变量、信号量和死锁实验。
-- virtio 块设备读写、块缓存、自定义文件系统和磁盘程序加载。
-- 文件跨重启保存。
-- 无日志版本稳定重现一次崩溃不一致。
-- fsck 独立发现该错误。
-- 已提交日志事务在课程定义的故障边界后可恢复，并且恢复幂等。
+- 启动并解释 kernel boot chain；
+- 用户程序通过 syscall 运行/退出；
+- 多任务 timer preemption；
+- 每进程独立地址空间；
+- thread 和同步原语；
+- shell、pipe、fork/exec/wait；
+- VirtIO block + filesystem；
+- 文件跨正常重启保存；
+- 无日志时稳定复现 crash inconsistency；
+- 在课程定义的 durable-boundary fault model 中，用 redo journal 恢复已提交事务。
 
-## 47 个正式学习单元
+---
 
-### A. 内核基础：01～05
+# 47 个学习单元
 
-| 课次 | 问题与实验 | 验收 |
-| --- | --- | --- |
-| [01](01-boot.md) | 从启动入口追踪到串口，增加欢迎语 | 能复述 QEMU → OpenSBI → `_start` → Rust → UART |
-| [02](02-console.md) | 提取串口模块并实现格式化打印 | 输出字符串、整数和十六进制地址 |
-| [03](03-panic.md) | 让 panic 输出消息和位置 | 受控 panic 可定位，恢复后正常启动 |
-| [04](04-memory-layout.md) | 认识段、启动栈并明确 BSS 初始化 | 输出布局，证明普通 BSS 清零不覆盖栈 |
-| [05](05-traps.md) | 建立异常入口并保存现场 | 受控非法指令报告 `scause/sepc/stval` |
-
-里程碑 A：内核能说明自己“运行到了哪里、哪里出了错”。
-
-### B. 第一个用户程序：06～10
+## A. 内核基础：01～05
 
 | 课次 | 问题与实验 | 验收 |
 | --- | --- | --- |
-| [06](06-process.md) | 区分程序与进程，设计最小状态记录 | 能解释 Program / Process / TrapFrame |
-| [07](07-user-mode.md) | 准备用户栈并进入 U 模式 | U-mode `ecall` 可被可信内核栈接住 |
-| [08](08-syscalls.md) | 实现最小系统调用并返回用户 | 连续调用返回正确，`sepc` 处理正确 |
-| [09](09-exit.md) | 用户退出后恢复内核管理流程 | exit 不返回用户，重复运行不堆栈 |
-| [10](10-user-errors.md) | 区分用户故障与内核故障 | 坏用户程序结束，正常程序还能继续 |
+| [01](01-boot.md) | 从 `cargo run` 追到 `Hello kernel` | 能说明 Cargo/QEMU/OpenSBI/_start/UART 各负责什么 |
+| [02](02-console.md) | 把 UART 输出分层成 console/format/macros | 字符串、整数、地址可复用输出 |
+| [03](03-panic.md) | 让 Rust panic 留下诊断 | message/location 正确，能说明 boot test 覆盖边界 |
+| [04](04-memory-layout.md) | 画内存地图并显式清普通 BSS | probe 证明清零代码真实执行 |
+| [05](05-traps.md) | 接住一次 CPU illegal instruction | TrapFrame/CSR/ABI 布局正确，报告后稳定停住 |
 
-里程碑 B：一个用户程序能通过内核服务输出并退出；此时尚未完成地址隔离。
+里程碑 A：内核能说明“运行到了哪里、哪里出了错”。
 
-### C. CPU 调度：11～15
+## B. 第一个用户程序：06～10
 
 | 课次 | 问题与实验 | 验收 |
 | --- | --- | --- |
-| [11](11-scheduling.md) | 手算和模拟 FCFS/SJF/RR | 响应时间、周转时间与模拟一致 |
+| [06](06-process.md) | Program 与一次 Process 实例有什么区别 | Ready→Running→Exited 最小状态机可解释 |
+| [07](07-user-mode.md) | 第一次进入 U-mode | user/trap/management stack 分离，U ecall 回可信内核 |
+| [08](08-syscalls.md) | 处理 syscall 再返回用户 | ecall `sepc += 4` 只用于已识别固定长度 ecall |
+| [09](09-exit.md) | exit 后不再返回原用户程序 | KernelContext 安全恢复，重复运行无栈漂移 |
+| [10](10-user-errors.md) | 用户 fault 不等于 kernel fault | Faulted 在需要时引入，fault 后其他受控程序继续 |
+
+里程碑 B：一个受控 U-mode 程序可以请求 kernel 服务、返回、退出或被 fault 终止。
+
+## C. CPU 调度：11～15
+
+| 课次 | 问题与实验 | 验收 |
+| --- | --- | --- |
+| [11](11-scheduling.md) | 用模拟理解 FCFS/SJF/RR | response/turnaround 手算与程序一致 |
 | [12](12-yield.md) | 保存任务现场，实现主动 `yield` | A/B 可交替前进且现场不串 |
-| [13](13-timer.md) | 接 SBI TIME，建立持续定时事件 | timer 可反复进入并正确返回 |
-| [14](14-preemption.md) | 用 timer 驱动抢占 RR | 不主动 yield 的任务也能切换 |
-| [15](15-mlfq.md) | 模拟并实现简化 MLFQ | 配额、降级、提升和对照实验可解释 |
+| [13](13-timer.md) | 接 SBI TIME，建立持续定时事件 | timer 可反复进入并正确关闭 |
+| [14](14-preemption.md) | 用 timer 驱动抢占 RR | 不主动 yield 的任务也能切换，syscall 不刷新完整 quantum |
+| [15](15-mlfq.md) | 实现简化 MLFQ | slice/allotment/boost/actual-user-time 计账可解释 |
 
-里程碑 C：用户程序能够被定时切换，机制与调度策略分开。
+里程碑 C：用户程序能够被 timer 抢占，机制与调度策略分开。
 
-### D. 内存虚拟化：16～23
-
-| 课次 | 问题与实验 | 验收 |
-| --- | --- | --- |
-| [16](16-addresses.md) | 区分物理地址与虚拟地址 | 手工解释地址转换和页内偏移 |
-| [17](17-frames.md) | 管理可用物理页 | 不碰预留区、耗尽和非法释放可验证 |
-| [18](18-heap.md) | 实现简单内核堆 | 大小/对齐、分割/合并和碎片可解释 |
-| [19](19-page-tables.md) | 手工构造 Sv39 页表 | 叶/非叶 PTE、权限和三级查询正确 |
-| [20](20-paging.md) | 建立内核映射并开启分页 | 分页后代码、栈、UART、异常仍工作 |
-| [21](21-address-spaces.md) | 每进程独立根页表 | 相同虚拟地址保存不同内容 |
-| [22](22-page-faults.md) | 缺页诊断和用户缓冲区验证 | 非法地址返回错误或结束用户，不伤内核 |
-| [23](23-vm-simulation.md) | TLB 与页面替换模拟 | 明确 TLB miss ≠ page fault ≠ swap |
-
-里程碑 D：进程拥有真正的地址空间隔离，内核能安全处理用户指针。
-
-### E. 进程接口与 shell：24～28
+## D. 内存虚拟化：16～23
 
 | 课次 | 问题与实验 | 验收 |
 | --- | --- | --- |
-| [24](24-exec.md) | 替换当前进程映像 | exec 成功不返回旧映像，失败保留旧程序 |
-| [25](25-wait.md) | 等待和回收子进程 | 先退出/后等待两种顺序都正确 |
-| [26](26-fork.md) | 复制地址空间的简化 fork | 父子返回值不同且内存独立 |
-| [27](27-pipes.md) | fd 与 pipe | 部分读写、阻塞、EOF、关闭引用正确 |
-| [28](28-shell.md) | 用户态 shell | 能执行内嵌程序及 `hello | cat` |
+| [16](16-addresses.md) | 区分物理地址与虚拟地址 | 手工解释地址转换和 page offset |
+| [17](17-frames.md) | 管理可用物理 frame | 不碰 reserved、耗尽/非法 free/zero reuse 可验证 |
+| [18](18-heap.md) | 实现简单 heap | 大小/对齐、split/coalesce、严格 byte 守恒 |
+| [19](19-page-tables.md) | 手工构造 Sv39 page table | leaf/non-leaf PTE、权限和三级查询正确 |
+| [20](20-paging.md) | 建 kernel mapping 并开启分页 | code/stack/UART/trap 正常，satp/sfence 可验证 |
+| [21](21-address-spaces.md) | 每 Process 独立 root | same VA 保存不同数据，root 生命周期安全 |
+| [22](22-page-faults.md) | fault 诊断和 user buffer validation | bad pointer 返回错误或结束 user，不伤 kernel |
+| [23](23-vm-simulation.md) | TLB 与 page replacement 模拟 | TLB miss ≠ page fault ≠ swap |
 
-里程碑 E：可以从用户命令行启动和组合程序。
+里程碑 D：Process 有真正地址空间隔离，kernel 可以安全处理 user pointer。
 
-### F. 并发：29～35
-
-| 课次 | 问题与实验 | 验收 |
-| --- | --- | --- |
-| [29](29-races.md) | 可控重现逻辑竞争 | 不依赖 Rust UB，错误版和修复版可重复 |
-| [30](30-threads.md) | 一个进程运行多个线程 | 共享地址空间、独立现场和栈 |
-| [31](31-atomics.md) | 原子操作、锁与中断边界 | 区分单字段原子和复合不变量 |
-| [32](32-mutex.md) | 睡眠互斥锁 | 竞争者阻塞、所有权交接和错误调用正确 |
-| [33](33-condvar.md) | 条件变量与有界队列 | 原子释放等待、重新加锁、不丢唤醒 |
-| [34](34-semaphore.md) | 计数信号量 | 许可守恒和容量上限正确 |
-| [35](35-deadlocks.md) | 构造并修复死锁 | 有等待环证据，统一顺序后完成 |
-
-里程碑 F：能重现、解释并修复典型同步错误。
-
-### G. 持久化：36～43
+## E. 进程接口与 shell：24～28
 
 | 课次 | 问题与实验 | 验收 |
 | --- | --- | --- |
-| [36](36-disk.md) | 准备独立实验磁盘 | 区分 512-byte sector 与 4 KiB fs block |
-| [37](37-block-read.md) | 初始化现代 virtio-blk 并读取 | 初始化顺序、feature、queue 和读请求正确 |
-| [38](38-block-write.md) | 写盘与 flush | 重启后同一镜像可读回数据 |
-| [39](39-cache.md) | 块缓存与脏写回 | 命中、驱逐、引用和写回失败行为明确 |
-| [40](40-format.md) | 定义磁盘格式和位图 | host mkfs 与 kernel mount 解码一致 |
-| [41](41-inodes.md) | inode 与文件内容 | 跨块读写、EOF、空间不足正确 |
-| [42](42-directories.md) | 目录和路径 | 多层路径、创建、列举和重启正确 |
-| [43](43-file-api.md) | 文件 API、磁盘程序和 shell | 文件跨重启保存，磁盘程序可执行 |
+| [24](24-exec.md) | 替换当前 Process image | success 不回 old image，failure 保留 old program |
+| [25](25-wait.md) | Zombie/wait/reap | 结构化 status exact copyout 成功后才 reap |
+| [26](26-fork.md) | eager-copy fork | parent/child return 不同、memory independent、failure rollback |
+| [27](27-pipes.md) | fd/pipe/partial I/O | 只验证 actual `n` bytes，Blocked/EOF/ref lifecycle 正确 |
+| [28](28-shell.md) | UART input + U-mode shell | idle timer 能唤醒 stdin，`hello | cat` 与大 pipeline 正确 |
 
-里程碑 G：具有可持久保存的文件和目录，并能从磁盘加载受控程序。
+里程碑 E：可以从用户命令行启动和组合程序，并明确 structured copyout 与 stream partial-I/O 的不同语义。
 
-### H. 崩溃一致性：44～47
+## F. 并发：29～35
 
 | 课次 | 问题与实验 | 验收 |
 | --- | --- | --- |
-| [44](44-crash-consistency.md) | 把一次更新拆成多个持久化步骤并故障注入 | 稳定复现至少一种元数据不一致 |
-| [45](45-fsck.md) | 实现只读离线一致性检查器 | 正常镜像零错，坏镜像报告具体 inode/块 |
-| [46](46-journal.md) | 实现固定容量物理 redo log | commit 前后具有明确、不同的持久语义 |
-| [47](47-recovery.md) | 启动恢复和故障矩阵 | 已提交事务可重放，恢复幂等，fsck 通过 |
+| [29](29-races.md) | 可控重现 logical race | 不依赖 Rust UB，错误/修复都可重复 |
+| [30](30-threads.md) | 一个 Process 多 Thread | shared AddressSpace、independent context/stack |
+| [31](31-atomics.md) | atomic、compound invariant、irq boundary | atomic field ≠ atomic invariant |
+| [32](32-mutex.md) | sleeping mutex | Blocked、FIFO direct handoff、pending completion 正确 |
+| [33](33-condvar.md) | condition variable | atomic release+sleep、reacquire、while predicate |
+| [34](34-semaphore.md) | counting semaphore | permit 守恒和 direct grant 正确 |
+| [35](35-deadlocks.md) | 构造并修复 deadlock | 区分 resource-allocation graph 与 wait-for graph，并有 cycle 证据 |
 
-里程碑 H：在明确的实验故障模型内恢复一致性。QEMU 强制退出实验与真实设备断电保证必须区分，日志覆盖的操作和数据范围必须写清楚。
+里程碑 F：能重现、解释并修复典型同步错误，不把 timeout 本身当 deadlock 证明。
+
+## G. 持久化：36～43
+
+| 课次 | 问题与实验 | 验收 |
+| --- | --- | --- |
+| [36](36-disk.md) | 准备独立实验 disk | 区分 byte / 512-byte sector / 4 KiB fs block |
+| [37](37-block-read.md) | modern virtio-blk 初始化与 READ | feature/queue/status 顺序正确，queue setup 后才 DRIVER_OK |
+| [38](38-block-write.md) | WRITE 与 FLUSH | completion/readback/flush/reboot 四层证据区分 |
+| [39](39-cache.md) | block cache | hit/pin/dirty/needs_flush/writeback failure 明确 |
+| [40](40-format.md) | 定义 on-disk format | host mkfs/dump 与 kernel mount 解码一致 |
+| [41](41-inodes.md) | inode/file content | cross-block/EOF/reservation rollback 正确 |
+| [42](42-directories.md) | directory/path | lookup/create/readdir 和正常发布顺序正确 |
+| [43](43-file-api.md) | file API、NEX1、shell | file 跨重启保存，disk program 可执行 |
+
+里程碑 G：具有可持久保存的文件和目录，并能从 disk file 加载受控程序；但 Stage 7 明确**没有 crash atomicity**。
+
+## H. 崩溃一致性：44～47
+
+统一技术协议：[stage-08-protocol.md](stage-08-protocol.md)。Stage 8 不允许逐课各自发明 commit/crash 语义。
+
+| 课次 | 问题与实验 | 验收 |
+| --- | --- | --- |
+| [44](44-crash-consistency.md) | 无 journal 时把 update 拆成多个 durable step | 在 FLUSH-completed checkpoint 稳定复现 inconsistency |
+| [45](45-fsck.md) | 只读 offline consistency checker | structural error 可定位；知道 fsck clean ≠ semantic commit correct |
+| [46](46-journal.md) | full-block physical redo + staging | commit 前 home 不偷写；COMMITTED FLUSH 是唯一 commit point |
+| [47](47-recovery.md) | boot recovery + durable fault matrix | PREPARED→old、COMMITTED→new，replay 中断仍幂等 |
+
+Stage 8 每个 crash case 使用三种 oracle：
+
+```text
+journal state
++ structural fsck
++ semantic old/new state（file write 还要 exact bytes）
+```
+
+里程碑 H：在明确的 single-device / single-transaction / full-block / flush-boundary QEMU fault model 中，受支持的单个 filesystem mutation syscall 可以恢复到可验证的 old-or-new 状态。
+
+不能把它宣传成：
+
+```text
+真实硬盘任意断电绝对不会坏
+```
+
+课程没有证明 torn 4 KiB write、device/controller 撒谎、多设备原子性、多核并发事务等问题。
+
+---
 
 ## 可复现性约定
 
@@ -217,14 +234,14 @@ stage-08-done
 
 ## 第一轮之后
 
-第一轮不会把 OSTEP 所有章节都变成内核功能。多核调度、真实换页、完整虚拟内存系统、磁盘调度、RAID、LFS、SSD、分布式文件系统、安全和虚拟机等保留为后续专题。
+第一轮不会把 OSTEP 所有章节都变成 kernel 功能。多核调度、真实换页、完整 VM、磁盘调度、RAID、LFS、SSD、distributed FS、安全和 VM/hypervisor 等保留为后续专题。
 
 进阶实现顺序建议：
 
 ```text
-写时复制
-→ 按需分配与真实换页
-→ 多核同步与调度
-→ 更完整的文件系统事务/缓存策略
-→ 网络与更完整用户运行时
+copy-on-write
+→ demand allocation + real swap
+→ multicore synchronization/scheduling
+→ stronger filesystem transaction/cache model
+→ network + richer user runtime
 ```
