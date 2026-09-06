@@ -27,7 +27,8 @@ jobs:
       - name: Build and boot kernel
         run: ./tests/boot.sh
 
-      # 新增 lesson checkpoint 文件通过 GitHub Contents API 创建时不依赖 executable bit，
-      # 所以显式交给 `/bin/sh` 执行；测试语义与文件权限解耦。
       - name: Verify lesson 01 checkpoint
         run: sh ./tests/lesson-01.sh
+
+      - name: Verify lesson 02 checkpoint
+        run: sh ./tests/lesson-02.sh

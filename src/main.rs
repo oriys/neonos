@@ -9,6 +9,10 @@
 // 所以我们会在下面自己提供真正的入口 `_start`。
 #![no_main]
 
+// `mod console;` 告诉 Rust：把 `src/console.rs` 作为当前 crate 的 `console` 模块编译进来。
+// 从第 02 课开始，UART 地址、volatile 写入和格式化输出都收口在这个模块里。
+mod console;
+
 // 从 `core::arch` 导入两个和汇编有关的工具：
 // - `asm!`：在 Rust 函数中插入少量汇编指令；
 // - `global_asm!`：在整个程序中加入一段全局汇编代码。
@@ -17,11 +21,6 @@ use core::arch::{asm, global_asm};
 // `PanicInfo` 保存 Rust 发生 panic 时的信息。
 // 因为我们没有标准库，所以必须自己实现 panic 之后该怎么办。
 use core::panic::PanicInfo;
-
-// `write_volatile` 用来执行“不能被编译器随便优化掉”的内存写入。
-// 后面我们会通过内存地址直接操作 UART 硬件，这类写入具有硬件副作用，
-// 因此不能把它当成普通内存写入。
-use core::ptr::write_volatile;
 
 // `global_asm!` 把下面这整段 RISC-V 汇编直接加入最终内核。
 // `r#" ... "#` 是 Rust 的 raw string（原始字符串），这样里面的双引号不需要转义。
@@ -79,11 +78,6 @@ boot_stack_top:
 "#
 );
 
-// QEMU 的 `virt` 虚拟机器把 UART（串口设备）映射在物理地址 `0x1000_0000`。
-// `*mut u8` 表示“指向一个可写 8 位整数的裸指针”。
-// 这里不是普通内存：往这个地址写一个字节，实际上就是给串口发送一个字符。
-const UART: *mut u8 = 0x1000_0000 as *mut u8;
-
 // Rust 2024 edition 要求把 `no_mangle` 这种可能影响链接安全性的属性写成 `unsafe(...)`。
 // `no_mangle` 的作用是禁止 Rust 修改函数符号名，确保汇编中的 `call rust_main`
 // 真正能找到一个就叫 `rust_main` 的符号。
@@ -92,16 +86,27 @@ const UART: *mut u8 = 0x1000_0000 as *mut u8;
 // `extern "C"`：使用稳定、明确的 C ABI 调用约定，方便汇编调用。
 // `-> !`：`!` 叫 never type，表示这个函数永远不会正常返回。
 pub extern "C" fn rust_main() -> ! {
-    // `b"..."` 创建的是“字节字符串”，其中每个字符最终都是一个 u8 字节。
-    // `for` 会把 `Hello kernel\n` 中的字节一个一个取出来。
-    for byte in b"Hello kernel\n" {
-        // `byte` 在这里是 `&u8`（对字节的引用），所以用 `*byte` 取出真正的 u8 值。
-        // 写裸指针可能破坏内存安全，因此 Rust 要求放进 `unsafe` 块。
-        // `write_volatile` 保证这次写入真的发生；写到 UART 后，QEMU 终端就会出现字符。
-        unsafe { write_volatile(UART, *byte) };
-    }
+    // 从这一课开始，主流程不再知道 UART 地址，也不直接调用 `write_volatile`。
+    // `println!` 只表达“我要格式化并输出这一行”，设备细节全部由 `console` 模块负责。
+    crate::println!("Hello kernel");
 
-    // 所有字符打印完后进入 `halt()`，当前内核没有任何其他工作，所以不再返回。
+    // `{}` 是普通十进制 Display 格式；真正把整数 42 转成字符的是 `core::fmt`，不是 UART。
+    crate::println!("count={}", 42);
+
+    // `{:#x}` 表示带 `0x` 前缀的小写十六进制格式。
+    // 这里故意打印链接地址附近的值，验证地址格式化也能工作。
+    crate::println!("addr={:#x}", 0x8020_0000usize);
+
+    // 无参数 `println!()` 只输出一个换行。
+    crate::println!();
+
+    // `print!` 不自动换行，所以这里先输出 `left`。
+    crate::print!("left");
+
+    // 随后的 `println!` 输出空格、`right` 和换行，最终终端看到一行 `left right`。
+    crate::println!(" right");
+
+    // 所有演示输出完成后进入 `halt()`，当前内核没有任何其他工作，所以不再返回。
     halt()
 }
 
@@ -123,6 +128,6 @@ fn halt() -> ! {
 // 参数名前加 `_` 表示“我现在故意没有使用这个参数”，避免编译器给出未使用警告。
 // 返回 `!`，因为发生 panic 后这个函数也永远不会正常返回。
 fn panic(_info: &PanicInfo) -> ! {
-    // 当前最小实现不打印 panic 信息，只让 CPU 停在等待循环中。
+    // 第 03 课才会让 panic 真正输出诊断；当前仍保持最小停机行为。
     halt()
 }
