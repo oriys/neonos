@@ -4,7 +4,6 @@ name = "neonos"
 version = "0.1.0"
 edition = "2024"
 
-# 教学测试 feature 默认全部关闭；默认启动不主动制造故障或切进不会返回的实验路径。
 [features]
 default = []
 lesson03-panic = []
@@ -12,9 +11,10 @@ lesson04-bss-probe = []
 lesson04-skip-bss-clear = []
 lesson05-illegal-trap = []
 lesson07-user-mode = []
-
-# 第 08 课：多次 U-mode ecall，经内核修改 TrapFrame 后恢复全部用户现场并 sret 返回。
 lesson08-syscalls = []
+
+# 第 09 课：有效 exit 返回内核管理调用链，非法 exit 仍恢复用户；随后重复运行 100 次。
+lesson09-exit = []
 
 [profile.dev]
 panic = "abort"
