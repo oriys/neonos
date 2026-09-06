@@ -1,5 +1,5 @@
 #!/bin/sh
-# 第 06 课 checkpoint：验证 Program 与 Process 分离，以及最小状态机的合法/非法转换。
+# 第 06 课 checkpoint：验证 Program 与 Process 分离，以及最初三态模型的核心语义仍然成立。
 set -eu
 
 kernel=target/riscv64gc-unknown-none-elf/debug/neonos
@@ -20,12 +20,12 @@ fail() {
     exit 1
 }
 
-# 先从 enum 本体确认本课没有偷跑后续状态。
-# 只依赖类型名和枚举内容，不把 `pub` / `pub(crate)` 这类 Rust 可见性写成课程契约。
+# 历史 lesson-06 PR 曾禁止 Faulted；累计分支推进到 lesson-10 后，Faulted 已经第一次真正需要。
+# 因此这里只继续保护 lesson-06 的原始契约，并防止尚未出现的 Blocked 被提前加入。
 state_enum=$(sed -n '/enum ProcessState {/,/^}/p' src/process.rs)
 [ -n "$state_enum" ] || fail "ProcessState enum not found"
-if printf '%s\n' "$state_enum" | grep -Eq 'Faulted|Blocked'; then
-    fail "ProcessState contains a state that belongs to a later lesson"
+if printf '%s\n' "$state_enum" | grep -Fq 'Blocked'; then
+    fail "ProcessState contains Blocked before any blocking primitive exists"
 fi
 printf '%s\n' "$state_enum" | grep -Fq 'Ready' || fail "Ready state missing"
 printf '%s\n' "$state_enum" | grep -Fq 'Running' || fail "Running state missing"
@@ -58,20 +58,17 @@ done
 
 grep -Eq '^\[model\] program=hello entry=0x[0-9a-fA-F]+ code=\[0x[0-9a-fA-F]+, 0x[0-9a-fA-F]+\)' "$log" \
     || fail "Program is not backed by visible linked entry/range symbols"
-
 grep -Fq '[model] pid=1 Ready' "$log" || fail "pid=1 did not start Ready"
 grep -Fq '[model] pid=1 Running' "$log" || fail "pid=1 did not transition Ready -> Running"
 grep -Fq '[model] pid=1 Exited(0)' "$log" || fail "pid=1 did not transition Running -> Exited(0)"
 grep -Fq '[model] pid=1 reject Exited -> Running kept=Exited(0)' "$log" \
     || fail "invalid Exited -> Running transition was not rejected atomically"
-
 grep -Fq '[model] pid=2 Ready' "$log" || fail "second process instance did not receive pid=2"
 grep -Fq '[model] shared_program=true' "$log" || fail "two processes do not reuse the same Program description"
 grep -Fq '[model] pid=2 Running' "$log" || fail "pid=2 did not run independently"
 grep -Fq '[model] pid=2 Exited(0)' "$log" || fail "pid=2 did not exit independently"
 grep -Fq '[model] process model ok' "$log" || fail "process model completion marker missing"
 
-# 这是模型实验，不应该误触发真实 trap 或 panic。
 if grep -Fq '[trap]' "$log"; then
     fail "lesson 06 model unexpectedly triggered a CPU trap"
 fi

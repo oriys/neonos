@@ -349,3 +349,35 @@ kernel_tp_saved:
 .globl kernel_context
 kernel_context:
     .space {kctx_size}
+
+.section .text.user_enter, "ax"
+.balign 4
+.globl run_task
+run_task:
+    # a0 points to this task's fully initialized, persistent trap-stack frame.
+    la t0, kernel_context
+    sd ra, {kctx_ra}(t0)
+    sd sp, {kctx_sp}(t0)
+    sd gp, {kctx_gp}(t0)
+    sd tp, {kctx_tp}(t0)
+    sd s0, {kctx_s0}(t0)
+    sd s1, {kctx_s1}(t0)
+    sd s2, {kctx_s2}(t0)
+    sd s3, {kctx_s3}(t0)
+    sd s4, {kctx_s4}(t0)
+    sd s5, {kctx_s5}(t0)
+    sd s6, {kctx_s6}(t0)
+    sd s7, {kctx_s7}(t0)
+    sd s8, {kctx_s8}(t0)
+    sd s9, {kctx_s9}(t0)
+    sd s10, {kctx_s10}(t0)
+    sd s11, {kctx_s11}(t0)
+
+    # 用户 trap 期间 Rust 需要恢复当前内核 gp/tp；仍保留第 07 课的专门可信副本。
+    la t0, kernel_gp_saved
+    sd gp, 0(t0)
+    la t0, kernel_tp_saved
+    sd tp, 0(t0)
+
+    mv sp, a0
+    j restore_user_frame

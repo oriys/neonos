@@ -4,10 +4,16 @@
 
 mod console;
 mod memory;
-mod trap;
 mod process;
-mod user;
+#[cfg(feature = "scheduling")]
+mod sbi;
+#[cfg(feature = "scheduling")]
+mod scheduler;
 mod syscall;
+#[cfg(feature = "scheduling")]
+mod timer;
+mod trap;
+mod user;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -97,6 +103,12 @@ pub extern "C" fn rust_main() -> ! {
     // Rust 管理流程随后提交 Process=Exited、清理栈，并顺序重复运行 100 次。
     #[cfg(feature = "lesson09-exit")]
     user::run_lesson09(_next_pid);
+
+    #[cfg(feature = "lesson10-user-errors")]
+    user::run_lesson10(_next_pid);
+
+    #[cfg(feature = "scheduling")]
+    scheduler::run();
 
     halt()
 }

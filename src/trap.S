@@ -138,6 +138,8 @@ user_trap_entry:
     beq a0, t0, terminate_process
 
     # ---------- ResumeUser ----------
+.globl restore_user_frame
+restore_user_frame:
     ld t0, {sepc}(sp)
     csrw sepc, t0
     ld t0, {sstatus}(sp)

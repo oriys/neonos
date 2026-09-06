@@ -82,6 +82,14 @@ while [ "$attempt" -lt 50 ]; do
     if grep -Fq 'Hello kernel' "$log"; then
         # 找到了就说明：编译、链接、OpenSBI 启动、_start、Rust、UART 整条链路都成功了。
         # `exit 0` 代表测试成功。
+        # GitHub's existing workflow enters here. Run the later course suite only
+        # in CI; a local boot smoke test remains a quick startup-only check.
+        if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            pid=
+            sh tests/course.sh
+        fi
         exit 0
     fi
 
