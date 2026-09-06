@@ -6,9 +6,10 @@ mod console;
 mod memory;
 mod trap;
 mod process;
-
-// 第 07 课第一次加入真实 U-mode 代码、用户栈和用户来源 trap 入口。
 mod user;
+
+// 第 08 课第一次把用户 a7/a0 真正解释成 syscall ABI。
+mod syscall;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -76,24 +77,26 @@ pub extern "C" fn rust_main() -> ! {
     memory::report_and_validate();
     trap::init();
 
-    // 第 05 课受控非法指令会直接进入内核 trap 并停止，不污染后续课次。
     #[cfg(feature = "lesson05-illegal-trap")]
     trap::trigger_lesson05();
 
-    // 第 06 课模型仍先执行，并返回下一个未使用 PID。
+    // 第 06 课模型先运行，下一课真实 Process 继续使用下一个 PID。
     let _next_pid = process::run_lesson06_model();
 
-    // 第 03 课 panic 回归必须仍能单独运行，所以它优先于第 07 课的“不返回”实验路径。
+    // 早期故障实验仍然保持独立。
     #[cfg(feature = "lesson03-panic")]
     {
         lesson03_deliberate_panic();
         crate::println!("SHOULD_NOT_REACH");
     }
 
-    // 默认构建不主动切换特权级；第 07 课 checkpoint 显式开启 feature。
-    // 一旦成功 sret，用户 ecall 会进入可信 trap 栈并由 handler 停住，因此这里不会返回。
+    // 第 07 课：只证明一次 S -> U -> S，trap 后不返回用户。
     #[cfg(feature = "lesson07-user-mode")]
     user::run_lesson07(_next_pid);
+
+    // 第 08 课：syscall handler 修改 TrapFrame，汇编恢复用户现场并多次 sret 返回。
+    #[cfg(feature = "lesson08-syscalls")]
+    user::run_lesson08(_next_pid);
 
     halt()
 }
