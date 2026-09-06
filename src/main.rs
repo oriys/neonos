@@ -8,6 +8,9 @@ mod console;
 // 第 04 课：读取 linker symbols，打印并验证真实内存地图。
 mod memory;
 
+// 第 05 课：S-mode trap 入口、TrapFrame 与异常诊断。
+mod trap;
+
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
@@ -92,7 +95,16 @@ pub extern "C" fn rust_main() -> ! {
     // 第 04 课：用真实 linker symbols 和当前 sp 验证内存布局。
     memory::report_and_validate();
 
-    // 第 03 课故障注入仍然保留，保证新增启动初始化没有破坏 panic 路径。
+    // 第 05 课 B 次：先只安装 stvec Direct 入口并保持普通 S interrupt 关闭。
+    // 默认构建到这里会打印 `trap ready`，但不会主动制造异常。
+    trap::init();
+
+    // 第 05 课 C 次的受控负例由 feature 打开。
+    // 独立汇编函数的第一条指令就是非法编码；trap handler 会打印事实后停住。
+    #[cfg(feature = "lesson05-illegal-trap")]
+    trap::trigger_lesson05();
+
+    // 第 03 课故障注入仍然保留，保证新增 trap 初始化没有破坏 Rust panic 路径。
     #[cfg(feature = "lesson03-panic")]
     {
         lesson03_deliberate_panic();
