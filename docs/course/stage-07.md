@@ -2,75 +2,306 @@
 
 状态：课程已安排，学习待开始。入口：[总路线](README.md) · [进度记录](progress.md)。
 
-目标：从专用实验磁盘读取和写入数据，建立块缓存、inode 和目录，通过用户接口创建文件，并从磁盘加载一个用户程序。
+目标：在**不会误写宿主机真实磁盘**的前提下，从一个专用 QEMU raw image 开始，完成 modern VirtIO block READ/WRITE/FLUSH、固定 block cache、精确定义的 on-disk format、inode/directory 和 user file API，最终从磁盘运行一个 NEX1 用户程序。
 
-阅读 OSTEP 第 36～41 章，见 [官方教材](https://pages.cs.wisc.edu/~remzi/OSTEP/)。设备实现参考 [Virtio 1.2 规范](https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html) 的初始化、MMIO、split virtqueue 和块设备部分，以及 [QEMU virt 平台说明](https://www.qemu.org/docs/master/system/riscv/virt.html)。磁盘与 RAID 章节用于概念比较，不要求第一版实现磁盘调度或 RAID。
+阅读 OSTEP 第 36～41 章；设备实现对照 [VirtIO 1.2](https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html) 与当前 QEMU `virt` 平台资料。
 
-## 前置与 17 次安排
+## 开始前边界
 
-先完成 [第六阶段](stage-06.md)，保留已有单核、内核不可抢占、固定容量设计。设备驱动首次接入用独立测试模式，暂不同时调试多线程和磁盘。
+保留前六阶段：
 
-每次 45～60 分钟，每周 2～3 次约 6～9 周；设备调试可继续拆分。课程准备不表示代码已经实现，也不是日历预约。
+- single hart；
+- S-mode kernel syscall path 不被 scheduler 任意抢占；
+- user Threads/pipe/shell 已稳定；
+- block/filesystem 第一版同步串行；
+- 不实现 PLIC block interrupt，先 polling used ring；
+- 不实现 async I/O；
+- 不实现 deletion/rename/link/symlink；
+- 不实现 crash journal，blocks 5..20 只预留给 Stage 8。
 
-| 次数 | 课程 | 当次任务 | 当次成果 |
+设备等待会带来有界 kernel latency；这不是高性能存储栈，而是为了先把**协议、所有权、持久化层次**做对。
+
+## 17 次学习安排
+
+| 次数 | 课程 | 当次问题 | 当次成果 |
 | --- | --- | --- | --- |
-| 1 | [36 实验磁盘](36-disk.md) | 镜像、扇区、设备配置 | 有可重复创建的专用测试盘 |
-| 2 | [37A 设备初始化](37-block-read.md) | 发现设备与特性协商 | 确认可用的现代 virtio 块设备 |
-| 3 | [37B 第一次读盘](37-block-read.md) | 请求链与完成检测 | 读到宿主机预置标记 |
-| 4 | [37C 错误与复用](37-block-read.md) | 范围、失败、队列复用 | 连续请求不耗尽队列 |
-| 5 | [38A 写盘](38-block-write.md) | 写入与设备完成 | 回读数据一致 |
-| 6 | [38B 刷新与重启](38-block-write.md) | flush、关闭再启动 | 重启后内容仍在 |
-| 7 | [39A 块缓存](39-cache.md) | 命中与固定容量替换 | 重复读减少设备请求 |
-| 8 | [39B 脏块写回](39-cache.md) | 驱逐、引用、错误 | 脏数据不被静默丢弃 |
-| 9 | [40A 磁盘格式](40-format.md) | 超级块、位图、inode 区 | 宿主机生成可识别镜像 |
-| 10 | [40B 挂载与分配](40-format.md) | 格式校验、位图分配 | 不分配元数据保留块 |
-| 11 | [41A 文件读取](41-inodes.md) | inode 与逻辑块 | 按偏移读取文件 |
-| 12 | [41B 文件写入](41-inodes.md) | 跨块、扩展与空间不足 | 文件大小和内容一致 |
-| 13 | [42A 路径查询](42-directories.md) | 目录项与逐级查找 | 找到文件或明确失败 |
-| 14 | [42B 创建与列举](42-directories.md) | 文件、子目录、重复名字 | 目录结构可重启读取 |
-| 15 | [43A 文件接口](43-file-api.md) | fd、偏移、用户复制 | 用户可创建和读写文件 |
-| 16 | [43B 磁盘程序](43-file-api.md) | 镜像头、加载与 exec | 运行磁盘上的程序 |
-| 17 | [43C shell 与验收](43-file-api.md) | 文件命令、刷新和重启 | 完整演示持久化 |
+| 1 | [36 实验磁盘](36-disk.md) | 怎样绝不碰宿主机真实磁盘 | 16 MiB protected raw image、sector/block 几何、DTB 记录 |
+| 2 | [37A VirtIO 初始化](37-block-read.md) | modern device 怎样正确进入 DRIVER_OK | feature/status/queue 状态机、physical queue addresses |
+| 3 | [37B 第一条 READ](37-block-read.md) | descriptor/avail/used 怎样交接 ownership | sector 64 exact marker、方向/fence/status/used-id 正确 |
+| 4 | [37C 复用/timeout](37-block-read.md) | index wrap 和慢设备怎样安全处理 | 100 次 read 无 descriptor leak；timeout reset 后才复用 |
+| 5 | [38A WRITE/readback](38-block-write.md) | WRITE completion 能证明什么 | 两 sector 独立写 + 不同 buffer readback |
+| 6 | [38B FLUSH/reboot](38-block-write.md) | 怎样证明跨 QEMU 生命周期仍存在 | 真 FLUSH、记录 cache mode、same-image Boot2 readback |
+| 7 | [39A cache](39-cache.md) | 重复 block 如何避免重复 I/O | 8 slots、key/pin、deterministic replacement |
+| 8 | [39B dirty/sync](39-cache.md) | clean 和 durable 为什么不同 | dirty writeback、`needs_flush`、失败重试 |
+| 9 | [40A on-disk format](40-format.md) | host/kernel 怎样解释同一 bytes | exact offsets/LE/bitmap/inode/dir/superblock 文档 + mkfs/dumpfs |
+| 10 | [40B mount/allocator](40-format.md) | 坏 image 怎样拒绝而不是覆盖 | capacity/layout/root validation，reserved blocks 不分配 |
+| 11 | [41A inode read](41-inodes.md) | offset 怎样跨 direct blocks | EOF/4097-byte 跨块/格式错误检查 |
+| 12 | [41B inode write](41-inodes.md) | 多 block 扩展失败怎样不留半成品 | WritePlan、全资源 reservation、zero-before-use、runtime rollback |
+| 13 | [42A path lookup](42-directories.md) | `/a/b` 怎样逐级到 inode | grammar、64-byte active entries、type/bitmap/name 校验 |
+| 14 | [42B create/mkdir](42-directories.md) | child/parent 怎样正常发布 | CreatePlan、parent size 最后发布、768-entry 边界 |
+| 15 | [43A file fd API](43-file-api.md) | fd/OpenFile/inode 怎么分层 | shared offset、copyout 后提交 offset、global-fsync 限制 |
+| 16 | [43B NEX1 exec](43-file-api.md) | disk bytes 怎样安全变 user image | exact NEX1 header/checksum/layout，复用 exec candidate/commit |
+| 17 | [43C shell + 2 boots](43-file-api.md) | 用户怎样真正使用持久文件 | ls/mkdir/touch/write/cat/sync、same-image reboot、disk program |
 
-## 第一版边界
+---
 
-使用 QEMU 专用 raw 镜像、virtio-mmio 现代接口、split queue、单队列、最多一个在途请求。先轮询 used ring 完成，不依赖 PLIC/外部中断；等待有时间上限，但超时不意味着设备停止访问缓冲区。第一版不在等待设备时切走内核栈，接受有界的调度延迟，异步 I/O 后续再做。
+# 贯穿整个 Stage 7 的六层“完成”
 
-所有请求缓冲区、描述符和队列为稳定的内核内存，设备接收物理地址；用户指针先复制，不能直接交给设备。设备未完成前不能释放或复用内存。MMIO volatile 访问和设备内存顺序屏障是不同要求。
+任何时候都不要只写一句：
 
-文件系统采用课程自定义格式，不是 ext4：4 KiB 块，固定 inode 表，12 个直接块指针，单文件最多 48 KiB；无间接块、稀疏文件、硬链接、符号链接、删除、重命名和日志。目录允许多层绝对路径，先不支持 `.`、`..` 和当前工作目录。
+```text
+“写盘成功”
+```
 
-## 固定格式练习
+要知道当前证据在哪一层：
 
-初始镜像 16 MiB，共 4096 个文件系统块；每块对应 8 个 512 字节设备扇区。
+```text
+L1: cache memory changed
+L2: cache block dirty
+L3: VirtIO WRITE completion OK
+L4: global needs_flush=true
+L5: VirtIO FLUSH completion OK
+L6: 关闭 QEMU、同一 image 重启后 READ 相同 bytes
+```
 
-| 块号 | 用途 |
-| --- | --- |
-| 0 | 超级块：魔数、版本、块大小、总块数、区域边界、根 inode |
-| 1 | 块位图，覆盖 4096 块，超范围位不可用 |
-| 2 | inode 位图，128 个 inode |
-| 3～4 | inode 表：128 项，每项 64 字节 |
-| 5～20 | 预留给下一阶段日志，当前不解释或分配 |
-| 21～4095 | 数据区；格式化时块 21 分配给根目录 |
+只有 L6 才是本课程在这套 QEMU/backend 配置下的跨启动持久化实验。
 
-inode 0 保留，根 inode 为 1；块 0～21 和 inode 0、1 标记已占用。所有持久字段显式小端编码，不直接把 Rust 结构体内存写盘。第 40 课将字段偏移写入格式说明，供宿主机工具与内核共同实现。
+即使达到 L6，也不等于真实硬件任意断电下已经事务一致；Stage 8 专门解决 crash consistency。
 
-## 持久性约定
+---
 
-区分内核缓存已修改、设备报告写完成、flush 完成、退出 QEMU 后重新启动这几步。课程基线要求设备支持并协商 flush，记录 QEMU 磁盘缓存设置；缺少所需能力时报告无法完成该验收，不假装已持久化。
+# 设备层不变量
 
-显式 sync 先写全部脏块与元数据，再等待设备 flush 成功。close 不自动代表数据已持久化。写入或刷新失败不清除未完成状态；无法判断磁盘状态时切只读错误模式，不用“回滚内存”声称已撤销磁盘写入。当前未实现崩溃事务，写入中断后的恢复是第八阶段任务。
+## 只写受保护 regular-file image
 
-## 计划产物与验收
+storage helper 必须：
 
-计划新增块设备驱动、`src/block_cache.rs`、`src/fs.rs` 及其子模块，磁盘格式文档 `docs/fs-format.md`、宿主机 `tools/mkfs.py`/镜像装载工具、`tests/storage.sh` 和磁盘启动配置。依实际目录复用模块，课程中再创建。
+- 目标在项目 test-output；
+- 是新建/明确测试 regular file；
+- 不接受 `/dev/...`；
+- 默认不覆盖；
+- 不跟随危险 symlink；
+- probe image 与 filesystem image 分开；
+- 同一时刻只有一个 writer。
 
-- [ ] 标记读写、边界错误、设备完成和缓冲区生命周期正确。
-- [ ] 缓存命中、脏块驱逐、引用占用与失败路径可验证。
-- [ ] 格式化与挂载同意同一磁盘布局，坏格式不会自动被覆盖。
-- [ ] 文件跨块读写、目录创建查询和容量不足行为明确。
-- [ ] 用户复制与 fd 偏移保持正确，旧管道和 shell 继续工作。
-- [ ] 显式 sync 后结束并重新启动 QEMU，读取同一文件内容。
-- [ ] 磁盘程序加载成功，坏镜像拒绝且旧程序保留。
+## 单位永远写全
 
-下一阶段实现一致性检查、写前日志和受控崩溃恢复。
+```text
+byte
+512-byte VirtIO sector
+4096-byte fs block = 8 sectors
+```
+
+16 MiB：
+
+```text
+32768 sectors
+4096 fs blocks
+```
+
+## VirtIO status/ownership
+
+```text
+reset
+→ ACKNOWLEDGE
+→ DRIVER
+→ features
+→ FEATURES_OK + readback
+→ queue setup/Ready
+→ DRIVER_OK
+```
+
+modern driver 要处理 `VIRTIO_F_VERSION_1`。
+
+一次 request：
+
+```text
+CPU owns descriptors/buffers
+→ publish avail + notify
+→ device may access
+→ used completion + fence + status
+→ CPU reclaims
+```
+
+timeout 后在 device reset **确认 status=0 之前**，不能复用旧 device-owned memory。
+
+`avail.idx/used.idx` 按 u16 wrapping 处理。
+
+---
+
+# cache 不变量
+
+```text
+same (device,fs_block) 最多一个 valid slot
+pinned slot 不驱逐
+handle 不跨 user return/Blocked 长期保留
+dirty 只有 home WRITE success 后才 clean
+任何 successful home WRITE → needs_flush=true
+只有 FLUSH success → needs_flush=false
+```
+
+filesystem mounted 后，normal home block 读写统一走 cache，不和 direct-driver path 混用同一区域。
+
+Stage 8 journal blocks 5..20 会建立单独明确的 transaction I/O 规则。
+
+---
+
+# version=1 on-disk layout
+
+```text
+0       superblock
+1       block bitmap
+2       inode bitmap
+3..4    inode table
+5..20   reserved journal area
+21      root directory data block
+21..4095 data-capable region
+```
+
+初始：
+
+```text
+blocks 0..21 allocated/reserved
+inode 0 reserved
+inode 1 root DIRECTORY
+root size=0
+direct[0]=21
+```
+
+inode/dir entry 都固定 64 bytes；全部持久整数 little-endian；不直接落 Rust struct memory。
+
+Stage 7 不解释 journal blocks。
+
+---
+
+# 正常运行失败 ≠ crash transaction
+
+Lesson 41/42 的 WritePlan/CreatePlan 可以保证：
+
+```text
+参数/容量/内存资源不足
+在 home I/O 发生前
+→ 回滚本次 reservation
+```
+
+但一旦不同 dirty home blocks 开始 writeback：
+
+```text
+QEMU crash
+```
+
+可能只落了一部分。
+
+所以 Stage 7 明确**没有**：
+
+- atomic create；
+- atomic multi-block write；
+- atomic mkdir；
+- fsck repair；
+- journal recovery。
+
+不要因为一次正常 `sync + reboot` 成功就声称已有 crash safety。
+
+设备 WRITE/FLUSH 出错进入 filesystem `WriteUncertain/read-only error mode`；不靠恢复内存旧值冒充磁盘 rollback。
+
+---
+
+# user file API 不变量
+
+```text
+fd entry
+→ OpenFile(ref-counted, shared offset)
+→ inode
+```
+
+- 每次独立 open → 新 OpenFile/offset；
+- fork/dup2 → 共享 OpenFile/offset；
+- Thread → 共享 Process fd table；
+- read/readdir：copyout 成功后才推进 offset；
+- regular write：copyin + FS write 成功后推进；
+- `fsync(fd)` 当前只是 fd 验证 + global sync，必须明确限制；
+- `open(CREATE)` 在真正 create 前预留 fd/OpenFile capacity。
+
+NEX1 checksum 只是 accidental-corruption check，不是 code signature/trust。
+
+---
+
+# 计划产物
+
+```text
+docs/fs-format.md
+src/block/...
+src/block_cache.rs
+src/fs/...
+tools/mkdisk.py
+tools/mkfs.py
+tools/dumpfs.py
+tools/mknex.py
+tests/storage.sh
+```
+
+依真实代码目录做合理模块复用，不为了和课程名字一致强行拆文件。
+
+## `tests/storage.sh` 必须分阶段
+
+```text
+prepare fresh image         # 仅一次
+boot1 write/create/sync
+boot2 same-image read/exec  # 禁止重新 mkfs
+host read-only dump/verify
+```
+
+失败保留 image/path/log，方便离线排查。
+
+测试还要覆盖：
+
+- VirtIO status failure；
+- descriptor/index reuse；
+- timeout reset；
+- flush unsupported/failure；
+- cache dirty writeback failure；
+- bad superblock/layout；
+- allocator reservation rollback；
+- inode cross-block/OutOfSpace；
+- bad directory/path；
+- fd/OpenFile pool exhaustion；
+- bad NEX1；
+- 旧 boot/user/scheduling/memory/process/concurrency 全回归。
+
+---
+
+# 第七阶段总验收
+
+### device
+
+- [ ] protected raw image + exact geometry。
+- [ ] modern VirtIO init/READ/WRITE/status/index/timeout ownership 正确。
+- [ ] FLUSH 真正协商/提交，backend cache 配置记录。
+- [ ] same-image second boot readback 成功。
+
+### cache/format
+
+- [ ] pin/key/dirty/needs_flush 不变量正确。
+- [ ] mkfs/dumpfs/kernel mount 共用 exact format。
+- [ ] bad format 只拒绝，不 auto-format。
+- [ ] journal reserved blocks 从未被 Stage 7 allocator 使用。
+
+### filesystem
+
+- [ ] inode EOF/cross-block/max-size/OutOfSpace 正确。
+- [ ] path grammar/directory entry/type/bitmap 校验正确。
+- [ ] create/mkdir 普通资源失败无 reservation 泄漏。
+- [ ] 明确承认 Stage 7 无 crash atomicity。
+
+### user
+
+- [ ] fd/OpenFile shared-offset 语义正确。
+- [ ] `ls/mkdir/touch/write/cat/sync` 可以真实使用 disk FS。
+- [ ] NEX1 disk program 可加载，坏 image 不破坏 old process。
+- [ ] Boot1/Boot2 同 image + host dumpfs 三方一致。
+
+通过后不要直接庆祝“文件系统完成”。下一问题正是：
+
+> **如果 crash 发生在多个 home blocks 只写了一半时，磁盘还能不能 mount？**
+
+进入 [第八阶段：崩溃一致性与恢复](stage-08.md)。
