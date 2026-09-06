@@ -2,59 +2,250 @@
 
 状态：待开始。前置：[第 02 课](02-console.md) 验收完成。预计 45～60 分钟。
 
-## 目标与预习
+## 为什么现在学 panic
 
-主动触发一次 panic，让内核报告消息和源代码位置；最后恢复正常启动。
+第 02 课刚得到一个可复用的打印路径。下一件最有价值的事不是继续加功能，而是让内核失败时能留下线索。
 
-阅读 [PanicInfo 文档](https://doc.rust-lang.org/core/panic/struct.PanicInfo.html) 中的 `message()` 与 `location()`。前者提供消息，后者返回可选的位置，所以要用 `if let Some(...)` 处理。Rust 中的 `Option` 表示“可能有，也可能没有”，先掌握这个例子即可。
+今天只解决：
 
-## 先解释现有行为（10 分钟）
+> **Rust 代码主动 `panic!` 时，内核怎样在停住之前告诉我们“发生了什么、在哪里发生”？**
 
-打开 [src/main.rs](../../src/main.rs) 最下方的 `#[panic_handler]`。当前参数叫 `_info`，函数直接进入 `halt()`，因此主动报错也没有诊断输出。
+本课不会处理 CPU 非法指令、缺页或定时中断。那些不是 Rust `panic!`，第 05 课开始建立独立的 trap 路径。
 
-本课只改现有 panic handler，不增加第二个。查看 [Cargo.toml](../../Cargo.toml) 中 panic 策略，理解本内核不会像普通桌面程序一样恢复到命令行或展开调用栈。
+## 先观察现在为什么“静默失败”
 
-## 分步实验（25 分钟）
+打开 [src/main.rs](../../src/main.rs) 最下方：
 
-1. 把 `_info` 改名为 `info`，在等待前先输出固定标记 `[panic]`。运行普通启动路径，确认没有意外报错。
-2. 用 `info.message()` 输出消息。用 `if let Some(location) = info.location()` 输出文件、行、列；缺少位置时输出 `location unavailable`。
-3. 在正常问候语之后临时加入 `panic!("lesson 03 deliberate failure");`。
-4. 运行 `cargo run`，核对消息、文件名及行号是否对应触发点。截图不是必需，复制关键输出到学习记录即可。
-5. 退出 QEMU，删除临时触发语句，再次运行并检查普通启动。
-
-预期形状如下，文件路径和行号以真实运行结果为准：
-
-```text
-Hello kernel
-[panic] lesson 03 deliberate failure
-at src/main.rs:<line>:<column>
+```rust
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    halt()
+}
 ```
 
-报告一次后等待属于本课预期，不会自动关闭 QEMU。故意调用 `panic!` 后，后续代码不可达属于预期；清理触发语句后再看编译警告是否仍存在。
+先翻译：
 
-## 一个需要分清的概念（5 分钟）
+```text
+Rust 发生 panic
+  ↓
+进入我们自己的 panic handler
+  ↓
+完全不读 PanicInfo
+  ↓
+halt()
+  ↓
+永远等待
+```
 
-`panic!` 是 Rust 程序主动走错误处理路径；CPU 异常是处理器发现需要交给异常入口处理的事件。非法指令不会自动变成这里的 `PanicInfo`。第五课会建立另一条报告路径。
+所以现在即使内核主动报错，终端也可能只表现成“突然停住”。
 
-打印代码本身必须尽量简单：复用第二课不分配堆内存的输出，不在 panic handler 内使用可能再次 panic 的 `unwrap`，也不主动再次调用 `panic!`。
+再打开 [Cargo.toml](../../Cargo.toml)，确认 dev/release 的 panic 策略是 `abort`。本项目不依赖栈展开来恢复执行；panic handler 的职责是尽量留下诊断，然后进入不可恢复的停机路径。
+
+## 本课只引入两个 Rust 概念
+
+### `PanicInfo`
+
+可以先理解成 panic 处理器收到的一张错误记录。我们只取：
+
+- `message()`：panic 消息；
+- `location()`：如果可用，返回源码文件、行、列。
+
+### `Option<T>`
+
+`location()` 可能有值，也可能没有，因此返回 `Option`：
+
+```text
+Some(location)  → 有位置
+None             → 没有位置
+```
+
+本课只需要会用：
+
+```rust
+if let Some(location) = info.location() {
+    // 使用 location
+}
+```
+
+不用提前学习 `Option` 的全部方法。
+
+## 先预测输出
+
+我们希望最后形成：
+
+```text
+普通启动：
+Hello kernel
+...
+
+故意 panic：
+Hello kernel
+[panic] lesson 03 deliberate failure
+at src/main.rs:<真实行>:<真实列>
+```
+
+panic 后不会回到 `rust_main` 继续执行。
+
+## 分步实验
+
+### 第一步：handler 先能打印固定标记
+
+把 `_info` 改成 `info`，但暂时只增加：
+
+```text
+[panic]
+```
+
+不要马上主动 panic。先正常 `cargo run`，确认普通启动**没有**出现 `[panic]`。
+
+这一小步验证：修改 handler 没有破坏正常路径。
+
+### 第二步：打印消息和位置
+
+使用第 02 课的打印工具输出：
+
+```text
+[panic] <message>
+at <file>:<line>:<column>
+```
+
+消息可以用 `info.message()` 格式化输出；位置必须处理 `Some/None` 两种情况。没有位置时输出固定文本，例如：
+
+```text
+location unavailable
+```
+
+panic handler 内不要调用 `unwrap()`，也不要再次 `panic!`。否则“报告错误的代码”本身可能再次报错，最终只留下递归失败。
+
+### 第三步：故意制造一次软件错误
+
+在正常问候语之后临时加入：
+
+```rust
+panic!("lesson 03 deliberate failure");
+```
+
+并在它后面临时放一个理论上不可达的标记，例如：
+
+```text
+SHOULD_NOT_REACH
+```
+
+先预测：这个标记会不会出现？
+
+再运行：
+
+```sh
+cargo run
+```
+
+核对：
+
+- panic 消息与触发文本一致；
+- 文件名、行、列对应**本次真实源码**；
+- `SHOULD_NOT_REACH` 不出现；
+- 报告一次后稳定停住。
+
+源码一改，行号就可能变化。课程不能把某个固定行号写成答案。
+
+## 一个非常重要的测试实验
+
+保持 `panic!` 暂时放在 `Hello kernel` **之后**，另开一次运行：
+
+```sh
+./tests/boot.sh
+```
+
+观察：它很可能仍然返回成功，因为当前脚本只等待 `Hello kernel`。
+
+这说明：
+
+```text
+“测试通过”
+只代表测试写出来的条件满足，
+不代表程序后面没有发生别的问题。
+```
+
+然后把故意 panic 移到 `Hello kernel` **之前**，再预测 `boot.sh` 会怎样。实验后恢复代码。
+
+这一小段不是为了折腾脚本，而是建立后面所有 OS 测试都要用的意识：**先读懂测试判定条件。**
+
+## panic 和 CPU trap 不是同一条路
+
+现在可以画：
+
+```text
+Rust 代码主动 panic!
+  ↓
+#[panic_handler]
+  ↓
+PanicInfo
+```
+
+而非法指令之类的处理器事件以后是：
+
+```text
+CPU 检测到异常
+  ↓
+硬件按照 stvec 进入 trap 汇编入口
+  ↓
+读取 scause / sepc / stval
+```
+
+非法指令不会自动变成一个 `PanicInfo`。反过来，`panic!` 也不是“CPU 自动发现某条非法指令”。
+
+## 当前 panic 打印路径的边界
+
+现在仍是单核、无调度、无并发打印的早期内核，所以直接复用 console 足够教学。
+
+以后有锁、中断和多线程后，panic 可能发生在“原本就持有某个锁”的位置；届时不能无条件假设复杂打印路径永远安全。本课只保证当前阶段的诊断需求，不提前宣称完成了生产级 panic 子系统。
 
 ## 常见问题
 
 | 现象 | 先检查 |
 | --- | --- |
-| 只看到 Hello 就停住 | handler 是否真的打印、宏是否调用到了输出模块 |
-| 报重复的 panic handler | 是否新增了一个而没有修改原来的函数 |
-| 行号与记录不一样 | 源码编辑会改变行号，应与本次触发语句核对 |
-| 启动脚本通过但有 panic | 脚本只检查 Hello，需要另看错误实验输出 |
+| 故意 panic 后完全没有 `[panic]` | handler 是否真的调用了第 02 课输出路径 |
+| 报重复 panic handler | 是否新增了第二个，而不是修改现有函数 |
+| 行号和课程示例不同 | 应以当前源码触发位置为准 |
+| `[panic]` 不断重复 | handler 或打印路径是否再次 panic |
+| `boot.sh` 通过但人工看到 panic | 脚本只检查 Hello，这是本课故意观察的覆盖缺口 |
 
-## 验收与复盘（10 分钟）
+## 验收：运行和理解都要通过
 
-- [ ] 故意触发时，消息与位置对应真实触发点。
-- [ ] 输出不会无限重复，等待后能退出 QEMU。
-- [ ] 删除触发语句后，无意外 panic，启动检查通过。
-- [ ] 能解释 `Option` 的两个分支以及 panic 与 CPU 异常的区别。
-- [ ] 更新 [进度记录](progress.md)，分别记录错误与正常两条路径。
+### 运行验收
 
-小练习：把临时 panic 放进新辅助函数中调用，观察报告的位置是函数调用处还是实际 panic 处。实验后移除触发代码。
+- [ ] 普通启动没有 `[panic]`。
+- [ ] 故意 panic 能看到消息与真实位置。
+- [ ] panic 后不可达标记不出现。
+- [ ] 报告不会无限递归。
+- [ ] 移除故意 panic 后恢复正常启动，`./tests/boot.sh` 通过。
 
-下一课：[认识内存布局](04-memory-layout.md) · [阶段安排](stage-01.md)。
+### 理解验收
+
+不看正文回答：
+
+1. `panic!` 到 `#[panic_handler]` 的路线是什么？
+2. 为什么 `location()` 需要处理“有”和“没有”两种情况？
+3. 为什么 panic handler 里不应该随便 `unwrap()`？
+4. 为什么 `boot.sh` 在 panic 位于 Hello 之后时仍可能成功？
+5. Rust panic 和 CPU 异常最根本的入口差别是什么？
+
+## 小练习
+
+把故意 panic 放进一个新的辅助函数：
+
+```text
+rust_main → helper → panic!
+```
+
+先猜 `location()` 指向调用 `helper` 的地方，还是实际执行 `panic!` 的地方，再运行验证。完成后移除触发代码。
+
+## 这一课结束后，下一问题自然出现了
+
+现在 Rust 自己主动报错时能留下信息。
+
+但如果 CPU 发现的是非法指令或坏地址，Rust 的 panic handler 根本收不到。要处理 CPU 异常，首先需要知道代码、数据、栈实际位于哪里，并且保证最早期运行环境可控。
+
+所以下一课先画内存地图：[第 04 课：给内核画一张内存地图](04-memory-layout.md)。
+
+最后在 [进度记录](progress.md) 同时记录一次故意失败输出和恢复后的正常输出。
