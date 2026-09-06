@@ -4,15 +4,16 @@ name = "neonos"
 version = "0.1.0"
 edition = "2024"
 
-# 教学测试 feature 默认全部关闭；正常内核只保留已经学会的能力，不主动制造故障。
+# 教学测试 feature 默认全部关闭；默认启动不主动制造故障或切进不会返回的实验路径。
 [features]
 default = []
 lesson03-panic = []
 lesson04-bss-probe = []
 lesson04-skip-bss-clear = []
-
-# 第 05 课：安装 stvec 后调用独立汇编触发器，制造一次受控非法指令异常。
 lesson05-illegal-trap = []
+
+# 第 07 课：真正执行 sret 进入 U-mode，再由一个用户 ecall 回到可信 S-mode trap 栈。
+lesson07-user-mode = []
 
 [profile.dev]
 panic = "abort"
