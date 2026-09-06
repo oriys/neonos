@@ -1,10 +1,28 @@
+# `[package]` 描述这个 Rust 包本身的基本信息。
 [package]
+
+# 包名叫 `neonos`。
+# Cargo 编译后，默认生成的可执行文件名字也会叫 `neonos`。
 name = "neonos"
+
+# 当前项目版本号。
+# 这里使用语义化版本格式：主版本.次版本.修订版本。
 version = "0.1.0"
+
+# 指定使用 Rust 2024 edition。
+# edition 可以理解为 Rust 语言规则的一组“版本开关”，
+# 它不会把 Rust 变成另一门语言，但会影响部分语法和默认规则。
 edition = "2024"
 
+# `[profile.dev]` 是 `cargo build` 默认使用的开发构建配置。
 [profile.dev]
+
+# 如果程序发生 panic，直接终止，不执行复杂的栈展开（unwind）。
+# 裸机内核没有普通操作系统运行时，使用 abort 更简单，也更适合当前阶段。
 panic = "abort"
 
+# `[profile.release]` 是 `cargo build --release` 使用的发布构建配置。
 [profile.release]
+
+# 发布版本发生 panic 时也直接终止，不进行栈展开。
 panic = "abort"
