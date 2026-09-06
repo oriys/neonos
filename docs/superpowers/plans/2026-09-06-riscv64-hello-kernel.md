@@ -24,7 +24,9 @@
 
 **Files:**
 - Create: `tests/boot.sh`
+- Create: `.gitignore`
 - Create: `Cargo.toml`
+- Generated: `Cargo.lock`
 - Create: `.cargo/config.toml`
 - Create: `linker.ld`
 - Create: `src/main.rs`
@@ -33,7 +35,7 @@
 - Consumes: QEMU `virt` memory map, bundled OpenSBI, and the built-in `riscv64gc-unknown-none-elf` Rust target.
 - Produces: `target/riscv64gc-unknown-none-elf/debug/neonos`, with ELF entry symbol `_start`; `pub extern "C" fn rust_main() -> !`; `cargo run` as the QEMU launch command.
 
-- [ ] **Step 1: Install missing host prerequisites**
+- [x] **Step 1: Install missing host prerequisites**
 
 Run:
 
@@ -44,7 +46,7 @@ brew install qemu
 
 Expected: `rustup target list --installed` contains `riscv64gc-unknown-none-elf`, and `qemu-system-riscv64 --version` exits successfully.
 
-- [ ] **Step 2: Write the failing end-to-end test**
+- [x] **Step 2: Write the failing end-to-end test**
 
 Create `tests/boot.sh`:
 
@@ -102,7 +104,13 @@ chmod +x tests/boot.sh
 
 Expected: FAIL because `Cargo.toml` does not exist. This catches a missing or broken build/boot/output chain; changing the entry, stack initialization, Rust call, UART address, or message prevents the expected guest output.
 
-- [ ] **Step 3: Add the minimal Cargo project configuration**
+- [x] **Step 3: Add the minimal Cargo project configuration**
+
+Create `.gitignore`:
+
+```gitignore
+/target
+```
 
 Create `Cargo.toml`:
 
@@ -137,7 +145,7 @@ runner = [
 ]
 ```
 
-- [ ] **Step 4: Add the linker layout**
+- [x] **Step 4: Add the linker layout**
 
 Create `linker.ld`:
 
@@ -174,7 +182,7 @@ SECTIONS
 }
 ```
 
-- [ ] **Step 5: Add `_start`, the kernel stack, and Rust UART output**
+- [x] **Step 5: Add `_start`, the kernel stack, and Rust UART output**
 
 Create `src/main.rs`:
 
@@ -227,7 +235,7 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 ```
 
-- [ ] **Step 6: Verify the test turns green**
+- [x] **Step 6: Verify the test turns green**
 
 Run:
 
@@ -247,7 +255,7 @@ cargo run
 
 Expected: the build succeeds; `file` identifies a 64-bit little-endian RISC-V ELF; OpenSBI reports the next address as `0x80200000`; the guest prints `Hello kernel`. Exit QEMU with `Ctrl-A X`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Cargo.toml .cargo/config.toml linker.ld src/main.rs tests/boot.sh
