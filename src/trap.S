@@ -1,9 +1,12 @@
-# 第 05～08 课共用的 S-mode trap 汇编。
+# 第 05～09 课共用的 S-mode trap 汇编。
 #
 # `trap_entry`：内核自身故障入口，进入时 sp 已可信；只报告并停机。
 # `user_trap_entry`：用户来源入口，先切可信 trap 栈，再保存完整用户现场。
-# 第 08 课开始，Rust handler 对可恢复 syscall 会返回；汇编再从同一个 TrapFrame
-# 恢复用户寄存器、sepc/sstatus/sscratch，并执行 sret。
+# Rust user trap handler 返回：
+#   a0 = 0  -> ResumeUser：从 TrapFrame 恢复并 sret
+#   a0 = 1  -> TerminateProcess：放弃用户现场，恢复 run_user 保存的 KernelContext
+#
+# KernelContext 固定大小由 Rust 注入：{kctx_size} bytes。
 
 .section .text.trap, "ax"
 .balign 4
@@ -11,7 +14,6 @@
 trap_entry:
     addi sp, sp, -{tf_size}
 
-    # 必须先保存原始 t0，之后才能把 t0 借作临时寄存器。
     sd t0, {x5}(sp)
     addi t0, sp, {tf_size}
     sd t0, {x2}(sp)
@@ -64,32 +66,26 @@ trap_entry:
     j 1b
 
 # ---------- U-mode 来源 trap ----------
-# 用户运行期间：
-#   sp       = user stack
-#   sscratch = trusted trap_stack_top
 .balign 4
 .globl user_trap_entry
 user_trap_entry:
-    # 第一个动作不信任 user sp：交换后当前 sp 立即变成 trusted trap stack top，
-    # 原 user sp 则进入 sscratch。
+    # 第一条先脱离 user-controlled sp。
     csrrw sp, sscratch, sp
-
     addi sp, sp, -{tf_size}
 
-    # 在复用这些寄存器前先保存用户原值。
+    # 复用前先保存用户值。
     sd t0, {x5}(sp)
     sd gp, {x3}(sp)
     sd tp, {x4}(sp)
 
-    # 保存 trap 前的 user sp。
     csrr t0, sscratch
     sd t0, {x2}(sp)
 
-    # 从这里起如果内核自己故障，应进入 kernel trap_entry，而不是再次按用户来源换栈。
+    # S-mode handler 内再次 fault 时走独立 kernel trap path。
     la t0, trap_entry
     csrw stvec, t0
 
-    # 用户可以任意改 gp/tp；调用 Rust 前恢复可信 kernel ABI 环境。
+    # 恢复可信 kernel ABI 的 gp/tp 后才能进入 Rust。
     la t0, kernel_gp_saved
     ld gp, 0(t0)
     la t0, kernel_tp_saved
@@ -133,26 +129,24 @@ user_trap_entry:
     csrr t0, stval
     sd t0, {stval}(sp)
 
-    # Rust 现在可以：
-    # - 第 07 课：打印证据并永远停住；
-    # - 第 08 课：修改 frame.a0 / frame.sepc 后正常 return。
+    # a0 返回的是“汇编下一步做什么”，不是用户 syscall result。
+    # 用户 result 已由 Rust 写回 frame.x10。
     mv a0, sp
     call rust_user_trap_handler
 
-    # ---------- 第 08 课恢复路径 ----------
-    # Rust 只有在“这是可恢复的用户 syscall”时才会返回到这里。
+    li t0, 1
+    beq a0, t0, terminate_process
 
-    # 先从修改后的 TrapFrame 恢复受内核控制的 CSR。
+    # ---------- ResumeUser ----------
     ld t0, {sepc}(sp)
     csrw sepc, t0
     ld t0, {sstatus}(sp)
     csrw sstatus, t0
 
-    # x2 也属于 TrapFrame 的用户现场。把它写进 sscratch，最后再交换回真正 sp。
+    # x2 也从修改后的 frame 恢复；最后用 sscratch 与 trusted sp 交换。
     ld t0, {x2}(sp)
     csrw sscratch, t0
 
-    # 在仍使用可信 trap stack 时，先恢复所有不影响当前 frame 基址的用户寄存器。
     ld ra, {x1}(sp)
     ld gp, {x3}(sp)
     ld tp, {x4}(sp)
@@ -183,22 +177,47 @@ user_trap_entry:
     ld t5, {x30}(sp)
     ld t6, {x31}(sp)
 
-    # 用户即将继续运行，下一次用户 trap 必须重新走“先换可信栈”的入口。
-    # 把这一步放得尽可能靠近 sret，缩短 S-mode 使用 user_trap_entry 的窗口。
+    # 尽量靠近 sret 才重新允许下一次 user trap 使用 user_trap_entry。
     la t0, user_trap_entry
     csrw stvec, t0
-
-    # t0 是最后一个需要从 frame 恢复的普通寄存器；之后不再借用它。
     ld t0, {x5}(sp)
 
-    # 回到 trap_stack_top 后，把 sp 与 sscratch 原子交换：
-    #   sp       <- frame.x2（用户 sp）
-    #   sscratch <- trap_stack_top（下次 trap 的可信入口栈）
     addi sp, sp, {tf_size}
     csrrw sp, sscratch, sp
-
-    # `sepc` 已由 Rust 推进到 ecall 后；所有用户寄存器也已经从 frame 恢复。
     sret
+
+# ---------- TerminateProcess ----------
+# 到这里时 Rust trap handler 已经正常 return，所有 Rust 局部借用/栈帧都已结束。
+# 当前 CPU 仍在可信 trap stack 上，因此可以安全放弃整个用户 TrapFrame，
+# 恢复进入用户之前 `run_user` 保存的内核调用现场。
+terminate_process:
+    # 管理模式不再需要“下次用户 trap 的栈顶”语义。
+    csrw sscratch, zero
+
+    la t0, kernel_context
+
+    ld ra, {kctx_ra}(t0)
+    ld gp, {kctx_gp}(t0)
+    ld tp, {kctx_tp}(t0)
+    ld s0, {kctx_s0}(t0)
+    ld s1, {kctx_s1}(t0)
+    ld s2, {kctx_s2}(t0)
+    ld s3, {kctx_s3}(t0)
+    ld s4, {kctx_s4}(t0)
+    ld s5, {kctx_s5}(t0)
+    ld s6, {kctx_s6}(t0)
+    ld s7, {kctx_s7}(t0)
+    ld s8, {kctx_s8}(t0)
+    ld s9, {kctx_s9}(t0)
+    ld s10, {kctx_s10}(t0)
+    ld s11, {kctx_s11}(t0)
+
+    # sp 最后恢复。t1 是 caller-saved，不属于 KernelContext 的持久 ABI 责任。
+    ld t1, {kctx_sp}(t0)
+    mv sp, t1
+
+    # `ret` 使用刚恢复的 ra，真正返回当初正常 call run_user 的 Rust 管理函数。
+    ret
 
 # ---------- 第 05 课受控非法指令 ----------
 .balign 4
