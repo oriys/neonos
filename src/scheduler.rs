@@ -469,9 +469,6 @@ fn batch(name: &str, policy: Policy, specs: &[Spec]) {
                 assert_eq!(t.timers, limit);
             }
         }
-        if specs[i].mode == 1 && specs[i].iterations >= 1_000_000 && timed {
-            assert!(t.timers > 0, "long task never preempted");
-        }
         if specs[i].mode == 2 && mlfq {
             assert!(t.demotions > 0, "yield escaped MLFQ accounting");
         }

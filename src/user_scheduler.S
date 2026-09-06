@@ -47,6 +47,12 @@ sched_yield:
     bnez a0, sched_fail
     j sched_next
 sched_syscall:
+    # Consume a measurable user burst between ordinary calls; even optimized
+    # fixtures must exceed one user-time budget to test non-reset semantics.
+    li t2, 1000
+2:
+    addi t2, t2, -1
+    bnez t2, 2b
     li a7, 999
     ecall
     li t0, -1

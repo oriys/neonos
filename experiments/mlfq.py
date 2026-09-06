@@ -65,7 +65,7 @@ def simulate(jobs, policy='mlfq', boost_period=40):
         finished = s['left'] == 0
         voluntary = bool(j.burst and s['used'] % j.burst == 0)
         expired = s['slice'] == 0
-        if policy == 'mlfq' and s['level'] < 2 and s['allot'] == 0:
+        if not finished and policy == 'mlfq' and s['level'] < 2 and s['allot'] == 0:
             s['level'] += 1
             s['slice'] = (2,4,8)[s['level']]
             s['allot'] = (4,8,0)[s['level']]

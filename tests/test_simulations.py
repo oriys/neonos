@@ -37,6 +37,9 @@ class SchedulingTests(unittest.TestCase):
             self.assertEqual(result,mlfq.simulate(jobs,policy))
             self.assertEqual(len(result['trace']),121)
             self.assertEqual(set(result['jobs']),{j.name for j in jobs})
+    def test_completion_precedes_demotion(self):
+        result=mlfq.simulate([mlfq.Job('A',0,4)],boost_period=100)
+        self.assertEqual(result['events'],[])
     def test_boost_after_allotment_expiry(self):
         result=mlfq.simulate([mlfq.Job('A',0,8)],boost_period=4)
         self.assertEqual(result['events'][:2],[(4,'demote','A'),(4,'boost',None)])

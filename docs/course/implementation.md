@@ -32,7 +32,7 @@ NEONOS_PROFILE=release python3 tests/scheduling_batch.py
 
 ### 实测证据
 
-本地 QEMU virt 生成的设备树给出 `timebase-frequency=10000000 Hz`。调度代码使用 `T=10000` 个平台 tick，不猜测 CPU 指令频率；测试重新读取当前 QEMU 的设备树，保存到 `target/test-output/timebase.txt`。
+本地 QEMU virt 生成的设备树给出 `timebase-frequency=10000000 Hz`。调度自动化使用 QEMU `-icount shift=0,align=off,sleep=off`，使虚拟时间随执行的 guest 指令推进，防止快机器在第一个 timer 前跑完测试负载。手动 `cargo run` 使用默认时钟，切换次数可能不同。调度代码使用 `T=10000` 个平台 tick，不猜测 CPU 指令频率；测试重新读取当前 QEMU 的设备树，保存到 `target/test-output/timebase.txt`。
 
 第 11 课 A=6、B=2、C=1 的手算输入：
 

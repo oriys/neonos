@@ -17,10 +17,12 @@ def run(features, final, name):
     (out / f'{name}-build.log').write_text(build.stdout + build.stderr)
     assert build.returncode == 0, build.stderr
     path = out / f'{name}.log'
+    # Tie scheduling fixture time to executed guest instructions, not host speed.
+    clock_args = ['-icount', 'shift=0,align=off,sleep=off'] if name.startswith('schedule') else []
     with path.open('w') as log:
         p = subprocess.Popen(['qemu-system-riscv64', '-machine', 'virt', '-bios', 'default',
                               '-kernel', f'target/riscv64gc-unknown-none-elf/{profile}/neonos',
-                              '-nographic', '-smp', '1'], stdout=log, stderr=subprocess.STDOUT)
+                              '-nographic', '-smp', '1'] + clock_args, stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 15
             while final not in path.read_text() and time.monotonic() < deadline:
