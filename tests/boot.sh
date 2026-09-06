@@ -49,22 +49,23 @@ cargo build
 # 这一步确认：生成物真的是“64 位、小端、RISC-V 的 ELF 可执行文件”。
 file "$kernel" | grep -Eq 'ELF 64-bit LSB executable.*RISC-V'
 
-# 启动 QEMU，真正把刚才编译出的内核跑起来。
+# 下面真正启动 QEMU：
+# - `qemu-system-riscv64`：64 位 RISC-V 系统模拟器；
+# - `-machine virt`：使用 QEMU 的通用 RISC-V `virt` 虚拟开发板；
+# - `-bios default`：使用 QEMU 自带的 OpenSBI 固件；
+# - `-kernel "$kernel"`：把刚才编译出的 neonos ELF 当作 kernel 加载；
+# - `-nographic`：不打开图形窗口，把串口输出走终端；
+# - `-smp 1`：只启动 1 个 hart（可以先理解成 1 个 CPU 核心）；
+# - `>"$log"`：把标准输出写入日志文件；
+# - `2>&1`：把标准错误也合并到同一个日志文件；
+# - 最后的 `&`：让 QEMU 在后台运行，这样脚本还能继续检查日志。
+# 每行末尾的 `\` 是 shell 续行符，表示“这条命令还没有结束，下一行还是同一条命令”。
 qemu-system-riscv64 \
-    # 使用 QEMU 的通用 RISC-V `virt` 虚拟开发板。
     -machine virt \
-    # 使用 QEMU 自带的 OpenSBI 固件。
     -bios default \
-    # 把我们的 ELF 作为 kernel 加载。
     -kernel "$kernel" \
-    # 不打开图形窗口，把串口输出走终端。
     -nographic \
-    # 只启动 1 个 hart（可以先理解成 1 个 CPU 核心）。
-    -smp 1 \
-    # `>"$log"`：把标准输出写入日志文件；
-    # `2>&1`：把标准错误也合并到同一个日志文件；
-    # `&`：让 QEMU 在后台运行，这样脚本还能继续执行后面的检查。
-    >"$log" 2>&1 &
+    -smp 1 >"$log" 2>&1 &
 
 # `$!` 是 shell 的特殊变量，表示“刚刚启动的后台进程 PID”。
 # 这里就是 QEMU 的进程 ID。
