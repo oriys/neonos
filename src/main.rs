@@ -19,7 +19,7 @@ mod console;
 use core::arch::{asm, global_asm};
 
 // `PanicInfo` 保存 Rust 发生 panic 时的信息。
-// 因为我们没有标准库，所以必须自己实现 panic 之后该怎么办。
+// 第 03 课会真正读取其中的消息和源码位置。
 use core::panic::PanicInfo;
 
 // `global_asm!` 把下面这整段 RISC-V 汇编直接加入最终内核。
@@ -86,48 +86,65 @@ boot_stack_top:
 // `extern "C"`：使用稳定、明确的 C ABI 调用约定，方便汇编调用。
 // `-> !`：`!` 叫 never type，表示这个函数永远不会正常返回。
 pub extern "C" fn rust_main() -> ! {
-    // 从这一课开始，主流程不再知道 UART 地址，也不直接调用 `write_volatile`。
-    // `println!` 只表达“我要格式化并输出这一行”，设备细节全部由 `console` 模块负责。
+    // 主流程只表达“输出什么”，不再接触 UART/MMIO 细节。
     crate::println!("Hello kernel");
-
-    // `{}` 是普通十进制 Display 格式；真正把整数 42 转成字符的是 `core::fmt`，不是 UART。
     crate::println!("count={}", 42);
-
-    // `{:#x}` 表示带 `0x` 前缀的小写十六进制格式。
-    // 这里故意打印链接地址附近的值，验证地址格式化也能工作。
     crate::println!("addr={:#x}", 0x8020_0000usize);
-
-    // 无参数 `println!()` 只输出一个换行。
     crate::println!();
-
-    // `print!` 不自动换行，所以这里先输出 `left`。
     crate::print!("left");
-
-    // 随后的 `println!` 输出空格、`right` 和换行，最终终端看到一行 `left right`。
     crate::println!(" right");
 
-    // 所有演示输出完成后进入 `halt()`，当前内核没有任何其他工作，所以不再返回。
+    // 默认构建不会进入这个分支。
+    // 第 03 课的自动测试会显式开启 `lesson03-panic` feature，
+    // 从而复现一次可控的软件 panic，而不需要测试脚本临时修改源码。
+    #[cfg(feature = "lesson03-panic")]
+    {
+        lesson03_deliberate_panic();
+
+        // `lesson03_deliberate_panic()` 在运行时一定 panic，因此这行绝不能出现。
+        // 保留它是为了让测试能证明 panic 没有错误地返回到原控制流。
+        crate::println!("SHOULD_NOT_REACH");
+    }
+
+    // 正常构建或 panic 测试完成诊断以后，内核都不会返回宿主机普通 main。
     halt()
 }
 
+// 这个辅助函数只在第 03 课故障注入构建中存在。
+// 故意不把返回类型写成 `!`，这样编译器不会仅凭函数签名替测试证明后续代码不可达；
+// “SHOULD_NOT_REACH 没出现”仍由真实运行行为证明。
+#[cfg(feature = "lesson03-panic")]
+fn lesson03_deliberate_panic() {
+    panic!("lesson 03 deliberate failure");
+}
+
 // `halt` 是一个永不返回的辅助函数。
-// 以后无论“正常没事做”还是 panic，都可以复用这里的等待逻辑。
 fn halt() -> ! {
-    // `loop` 是 Rust 的无限循环。
     loop {
         // 在循环中执行 RISC-V 的 `wfi` 指令，让 CPU 等待中断。
-        // 内联汇编属于底层操作，因此需要 `unsafe`。
         unsafe { asm!("wfi") };
     }
 }
 
 // `#[panic_handler]` 告诉 Rust：如果程序发生 panic，就调用下面这个函数。
-// `no_std` 环境没有标准库替我们打印错误或退出进程，所以内核必须自己定义处理方式。
 #[panic_handler]
-// `_info` 中包含 panic 位置等信息。
-// 参数名前加 `_` 表示“我现在故意没有使用这个参数”，避免编译器给出未使用警告。
-// 返回 `!`，因为发生 panic 后这个函数也永远不会正常返回。
-fn panic(_info: &PanicInfo) -> ! {
-    // 第 03 课才会让 panic 真正输出诊断；当前仍保持最小停机行为。
+fn panic(info: &PanicInfo) -> ! {
+    // 先输出固定前缀和 Rust 提供的 panic message。
+    // 这里不使用 unwrap/expect，避免“报告错误的代码”再次触发 panic。
+    crate::println!("[panic] {}", info.message());
+
+    // `location()` 返回 Option：编译器通常能提供源码位置，但 API 不保证永远有。
+    if let Some(location) = info.location() {
+        crate::println!(
+            "at {}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+    } else {
+        crate::println!("location unavailable");
+    }
+
+    // panic 是不可恢复路径：留下诊断后稳定停住，不回 rust_main 继续执行。
     halt()
 }

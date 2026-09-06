@@ -1,7 +1,4 @@
 # 这个文件定义 GitHub Actions 的持续集成（CI）流程。
-# 每次 push 或提交 Pull Request 时，GitHub 都会自动创建一台临时机器，
-# 编译并真正启动一次我们的 RISC-V 内核，防止代码改坏后却没有发现。
-
 name: CI
 
 on:
@@ -32,3 +29,6 @@ jobs:
 
       - name: Verify lesson 02 checkpoint
         run: sh ./tests/lesson-02.sh
+
+      - name: Verify lesson 03 checkpoint
+        run: sh ./tests/lesson-03.sh
