@@ -6,7 +6,11 @@
 
 阅读 OSTEP 第 42 章中 crash consistency 的问题部分。目标不是马上修复，而是先把一次文件系统更新拆成多个持久写入，并稳定重现“只完成了一半”的状态。
 
-本课只使用专用测试镜像副本。QEMU 被终止代表课程中的受控崩溃点，不等同于真实硬件断电模型。
+本课故意测试 **Stage 7 的无日志写入路径**；第 46～47 课才按照 [第八阶段统一协议](stage-08-protocol.md) 加入 full-block redo journal。不要把本课的坏写入顺序直接当成最终日志协议。
+
+本课只使用专用测试镜像副本。QEMU 被终止代表课程中的受控崩溃点，不等同于真实硬件任意断电模型。
+
+---
 
 ## A 次：先写出不变量
 
@@ -15,58 +19,86 @@
 ```text
 数据块内容
 块位图
-inode 的直接块指针
+inode 的 direct block pointer
 inode.size
 ```
 
-在没有日志的第七阶段实现中，这些变化最终都要写回磁盘，但它们不可能在同一个不可分割的设备动作里同时完成。
+在没有 journal 的第七阶段实现中，这些变化最终都要写回磁盘，但它们不可能在同一个不可分割的设备动作里同时完成。
 
 先写出完成状态必须满足的不变量：
 
-1. inode 引用的数据块必须在合法数据区。
-2. 被 inode 引用的数据块必须在块位图中标记为已占用。
-3. 一个普通数据块不能同时被两个互不共享的 inode 当作私有块。
-4. inode.size 所覆盖的非稀疏文件逻辑块必须有对应块指针。
-5. 未被任何 inode/目录/系统保留区域使用的块不应永久标为已占用。
+1. inode 引用的数据块必须在合法 data region。
+2. 被 inode 引用的数据块必须在 block bitmap 中标记 allocated。
+3. 一个普通 data block 不能同时被两个互不共享的 inode 当作私有块。
+4. inode.size 所覆盖的非 sparse file logical blocks 必须有对应 direct pointer。
+5. 未被任何 inode/directory/system-reserved region 使用的 block 不应永久标为 allocated。
 
 再讨论两种危险顺序：
 
 ```text
-先持久化位图，再持久化 inode
-→ 中途崩溃可能产生“已占用但无人引用”的泄漏块
+先持久化 bitmap，再持久化 inode
+→ 中途 crash 可能产生“allocated 但无人引用”的 leak block
 
-先持久化 inode，再持久化位图
-→ 中途崩溃可能产生“inode 引用但位图仍空闲”的块
+先持久化 inode，再持久化 bitmap
+→ 中途 crash 可能产生“inode 引用但 bitmap 仍 free”的 block
 ```
 
-不要把“换个写入顺序”误认为已经解决全部一致性问题；多块更新通常仍存在某个中间状态。
+不要把“换个写入顺序”误认为已经解决全部一致性问题；多块更新通常仍存在某个坏中间状态。
+
+### 数据内容也属于一致性讨论
+
+即使 inode/bitmap 最终结构上自洽，如果 inode 已经 durable 指向一个“新分配但内容尚未 durable”的 data block，也可能得到结构 clean、内容却不是用户期望值的状态。
+
+因此从这一课开始区分：
+
+```text
+structural consistency
+semantic file content
+```
+
+第 45 课 fsck 主要检查前者；第 47 课 recovery test 还会单独检查 old/new exact content oracle。
+
+---
 
 ## B 次：做确定性的故障注入
 
-1. 给文件扩展路径增加仅测试使用的故障点编号，不通过随机 sleep 猜时机。
-2. 测试脚本从同一份已知正确基线镜像复制出工作副本。
-3. 在位图已写回并 flush、inode 尚未写回之前终止 QEMU，重启时不要重新 mkfs。
-4. 用宿主机离线脚本或最小解码工具查看位图与 inode，记录真实矛盾。
-5. 再做相反顺序的独立实验：让 inode 更新持久、位图尚未持久，观察另一类矛盾。
-6. 每次实验后丢弃工作副本，从原基线重新复制，避免前一个坏镜像影响下一次结论。
+1. 给无日志 file-extension path 增加仅测试使用的故障点编号，不通过 random sleep 猜时机。
+2. 测试脚本从同一份已知正确 baseline image 复制出新的工作副本。
+3. 在 bitmap 已 writeback **且 FLUSH 成功**、inode 尚未 writeback 之前终止 QEMU，重启时不要重新 mkfs。
+4. 用宿主机 offline decoder/fsck 查看 bitmap 与 inode，记录真实矛盾。
+5. 再做相反顺序的独立实验：让 inode update **FLUSH durable**、bitmap 尚未 durable，观察另一类矛盾。
+6. 每次实验后丢弃工作副本，从 baseline 重新复制，避免前一个坏镜像影响下一 case。
 
-这里的关键是“flush 后再触发故障”。如果只在发出写请求后立刻 kill QEMU，无法可靠知道哪些数据真正到达了课程定义的持久边界。
+这里的关键是：
+
+> **只有显式 FLUSH 成功以后，教材才把那一组写入当作可证明的 durable checkpoint。**
+
+如果只在 WRITE request completed 后、FLUSH 前 kill QEMU：
+
+```text
+不能可靠断言“这次 write 一定已持久”
+也不能可靠断言“一定没持久”
+```
+
+这种点可以做观察实验，但只能重启后读取实际磁盘 bytes 再解释，不能作为确定性 old/new 教材答案。
 
 ## 常见问题
 
 | 现象 | 先检查 |
 | --- | --- |
-| 每次损坏结果不同 | 故障点是否放在明确的 flush 边界 |
-| 重启后文件系统又正常了 | 测试脚本是否偷偷重新格式化或覆盖镜像 |
-| 看见内容错就叫元数据损坏 | 先分别检查数据块、inode 和位图各自是什么状态 |
-| 所有顺序看起来都安全 | 是否只测试了一个磁盘块内的修改，没有覆盖多块元数据更新 |
+| 每次损坏结果不同 | 是否在没有 durable evidence 的 write/flush 中间点 kill |
+| 重启后 filesystem 又正常了 | test script 是否偷偷重新 mkfs/覆盖 working image |
+| 看见内容错就都叫 metadata corruption | data/inode/bitmap 分别检查实际状态 |
+| 所有写入顺序看起来都安全 | 是否只测一个 disk block，没有覆盖 multi-block update |
+| fsck clean 就说 operation 正确 | structural clean 不等于事务 semantic old/new 正确 |
 
 ## 验收与复盘
 
-- [ ] 能解释为什么多个持久块更新不能靠普通内存临界区获得崩溃原子性。
-- [ ] 写出至少 5 条本课程文件系统不变量。
-- [ ] 稳定复现“位图占用但 inode 不引用”或“inode 引用但位图空闲”至少一种矛盾。
-- [ ] 故障实验使用相同基线镜像和明确 flush 边界，可重复得到同类结果。
-- [ ] 能区分运行时错误回滚与崩溃后的磁盘一致性恢复。
+- [ ] 能解释为什么多个 persistent block update 不能靠普通 memory critical section 获得 crash atomicity。
+- [ ] 写出至少 5 条本课程 filesystem structural invariants。
+- [ ] 稳定复现“bitmap allocated 但 inode 不引用”或“inode 引用但 bitmap free”至少一种矛盾。
+- [ ] 故障实验从同一 baseline 的独立副本开始，并使用明确 FLUSH-completed checkpoint。
+- [ ] 能区分 runtime failure rollback、structural consistency、semantic file content 和 crash recovery。
+- [ ] 知道本课测试的是 Stage 7 无 journal path，不是第 46 课最终 transaction protocol。
 
-下一课：[第 45 课：做一个小型文件系统检查器](45-fsck.md)。
+下一课：[第 45 课：让检查器指出磁盘哪里不一致](45-fsck.md)。
