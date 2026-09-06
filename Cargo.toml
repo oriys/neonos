@@ -14,6 +14,12 @@ version = "0.1.0"
 # 它不会把 Rust 变成另一门语言，但会影响部分语法和默认规则。
 edition = "2024"
 
+# `features` 用来定义“只有显式开启时才编译”的教学测试开关。
+# 默认正常启动不会故意 panic；第 03 课 checkpoint 会单独开启 `lesson03-panic`。
+[features]
+default = []
+lesson03-panic = []
+
 # `[profile.dev]` 是 `cargo build` 默认使用的开发构建配置。
 [profile.dev]
 
