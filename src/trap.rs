@@ -1,22 +1,17 @@
-// 第 05 课：S-mode trap 的 Rust 一侧。
+// 第 05～09 课的 trap / context 布局定义。
 //
-// `trap.S` 负责“CPU 刚进异常时先保存现场”，本文件负责：
-// - 定义 TrapFrame 的唯一 Rust 布局；
-// - 把同一组 offset 常量传给汇编；
-// - 安装 stvec Direct 入口；
-// - 打印一次受控异常的真实 CSR/寄存器事实。
+// TrapFrame：用户/内核被 trap 时的完整整数现场。
+// KernelContext：第 09 课 `run_user` 汇编桥为了“以后正常返回原 Rust 调用者”保存的内核调用现场。
 
 use core::arch::{asm, global_asm};
 use core::mem::{offset_of, size_of};
 use core::ptr::addr_of;
 
-// RV64 每个整数寄存器/CSR 槽位都是 8 bytes。
 const SLOT_SIZE: usize = 8;
 
-// 32 个整数寄存器 + 4 个关键 CSR。
+// ---------- TrapFrame ----------
 pub const TRAP_FRAME_SIZE: usize = 36 * SLOT_SIZE;
 
-// x0..x31 的槽位严格按照寄存器编号排列。
 const X0: usize = 0 * SLOT_SIZE;
 const X1: usize = 1 * SLOT_SIZE;
 const X2: usize = 2 * SLOT_SIZE;
@@ -55,10 +50,8 @@ const SEPC: usize = 33 * SLOT_SIZE;
 const SCAUSE: usize = 34 * SLOT_SIZE;
 const STVAL: usize = 35 * SLOT_SIZE;
 
-// `repr(C)` 固定字段顺序和 C-compatible alignment，避免 Rust 自行重排。
 #[repr(C)]
 pub struct TrapFrame {
-    // x[0] 对应 x0，x[1] 对应 ra(x1)，x[2] 对应 trap 前原始 sp，以此类推。
     pub x: [usize; 32],
     pub sstatus: usize,
     pub sepc: usize,
@@ -66,7 +59,6 @@ pub struct TrapFrame {
     pub stval: usize,
 }
 
-// 编译期布局检查：有人修改 TrapFrame 而忘记同步汇编时，让构建尽早失败。
 const _: [(); TRAP_FRAME_SIZE] = [(); size_of::<TrapFrame>()];
 const _: [(); 0] = [(); offset_of!(TrapFrame, x)];
 const _: [(); 32 * SLOT_SIZE] = [(); size_of::<[usize; 32]>()];
@@ -75,8 +67,45 @@ const _: [(); SEPC] = [(); offset_of!(TrapFrame, sepc)];
 const _: [(); SCAUSE] = [(); offset_of!(TrapFrame, scause)];
 const _: [(); STVAL] = [(); offset_of!(TrapFrame, stval)];
 
-// 把 Rust 侧的同一份 frame 常量注入 `trap.S`。
-// 汇编不再自己维护另一套“288/offset 记忆”。
+// ---------- KernelContext ----------
+// `run_user` 是一个普通 C ABI callee，所以要保证恢复后原 Rust caller 看到的 callee-saved 状态没有变化。
+// 除 ra/sp/s0..s11 外，本课程还显式保存 gp/tp，避免用户代码修改后污染可信内核运行环境。
+#[repr(C)]
+pub struct KernelContext {
+    pub ra: usize,
+    pub sp: usize,
+    pub gp: usize,
+    pub tp: usize,
+    pub s: [usize; 12],
+}
+
+pub const KERNEL_CONTEXT_SIZE: usize = size_of::<KernelContext>();
+pub const KCTX_RA: usize = offset_of!(KernelContext, ra);
+pub const KCTX_SP: usize = offset_of!(KernelContext, sp);
+pub const KCTX_GP: usize = offset_of!(KernelContext, gp);
+pub const KCTX_TP: usize = offset_of!(KernelContext, tp);
+pub const KCTX_S0: usize = offset_of!(KernelContext, s) + 0 * SLOT_SIZE;
+pub const KCTX_S1: usize = offset_of!(KernelContext, s) + 1 * SLOT_SIZE;
+pub const KCTX_S2: usize = offset_of!(KernelContext, s) + 2 * SLOT_SIZE;
+pub const KCTX_S3: usize = offset_of!(KernelContext, s) + 3 * SLOT_SIZE;
+pub const KCTX_S4: usize = offset_of!(KernelContext, s) + 4 * SLOT_SIZE;
+pub const KCTX_S5: usize = offset_of!(KernelContext, s) + 5 * SLOT_SIZE;
+pub const KCTX_S6: usize = offset_of!(KernelContext, s) + 6 * SLOT_SIZE;
+pub const KCTX_S7: usize = offset_of!(KernelContext, s) + 7 * SLOT_SIZE;
+pub const KCTX_S8: usize = offset_of!(KernelContext, s) + 8 * SLOT_SIZE;
+pub const KCTX_S9: usize = offset_of!(KernelContext, s) + 9 * SLOT_SIZE;
+pub const KCTX_S10: usize = offset_of!(KernelContext, s) + 10 * SLOT_SIZE;
+pub const KCTX_S11: usize = offset_of!(KernelContext, s) + 11 * SLOT_SIZE;
+
+const _: [(); 128] = [(); KERNEL_CONTEXT_SIZE];
+const _: [(); 0] = [(); KCTX_RA];
+const _: [(); 8] = [(); KCTX_SP];
+const _: [(); 16] = [(); KCTX_GP];
+const _: [(); 24] = [(); KCTX_TP];
+const _: [(); 32] = [(); KCTX_S0];
+const _: [(); 120] = [(); KCTX_S11];
+
+// trap.S 同时需要 TrapFrame 和 KernelContext 的唯一布局常量。
 global_asm!(
     include_str!("trap.S"),
     tf_size = const TRAP_FRAME_SIZE,
@@ -116,6 +145,23 @@ global_asm!(
     sepc = const SEPC,
     scause = const SCAUSE,
     stval = const STVAL,
+    kctx_size = const KERNEL_CONTEXT_SIZE,
+    kctx_ra = const KCTX_RA,
+    kctx_sp = const KCTX_SP,
+    kctx_gp = const KCTX_GP,
+    kctx_tp = const KCTX_TP,
+    kctx_s0 = const KCTX_S0,
+    kctx_s1 = const KCTX_S1,
+    kctx_s2 = const KCTX_S2,
+    kctx_s3 = const KCTX_S3,
+    kctx_s4 = const KCTX_S4,
+    kctx_s5 = const KCTX_S5,
+    kctx_s6 = const KCTX_S6,
+    kctx_s7 = const KCTX_S7,
+    kctx_s8 = const KCTX_S8,
+    kctx_s9 = const KCTX_S9,
+    kctx_s10 = const KCTX_S10,
+    kctx_s11 = const KCTX_S11,
 );
 
 unsafe extern "C" {
@@ -129,11 +175,9 @@ fn trap_entry_address() -> usize {
 }
 
 pub fn trigger_address() -> usize {
-    // SAFETY: `trap_trigger_label` 由 `trap.S` 导出；这里只取得符号地址，不解引用。
     unsafe { addr_of!(trap_trigger_label) as usize }
 }
 
-// 第 05 课先把普通 S-mode 中断明确关着，只处理同步异常。
 pub fn init() {
     let entry = trap_entry_address();
 
@@ -141,11 +185,6 @@ pub fn init() {
         panic!("trap_entry is not 4-byte aligned: {:#x}", entry);
     }
 
-    // SAFETY:
-    // - 当前由 OpenSBI 进入 S-mode kernel；这些 CSR 是本级允许访问的 supervisor CSR；
-    // - `sie=0` 关闭具体 S interrupt enable；
-    // - `csrci sstatus,2` 清 SIE 全局位；
-    // - stvec 低两位为 0，选择 Direct mode。
     unsafe {
         asm!(
             "csrw sie, zero",
@@ -157,7 +196,6 @@ pub fn init() {
     }
 
     let actual: usize;
-    // SAFETY: 只读取刚写入的 supervisor trap-vector CSR。
     unsafe {
         asm!(
             "csrr {actual}, stvec",
@@ -177,32 +215,21 @@ pub fn init() {
     crate::println!("trap ready");
 }
 
-// 只在第 05 课的故障注入构建中调用。
 #[cfg(feature = "lesson05-illegal-trap")]
 pub fn trigger_lesson05() -> ! {
     crate::println!("trigger at {:#x}", trigger_address());
-
-    // SAFETY: 这个汇编函数专门用于受控教学故障；它的第一条指令就是非法编码。
     unsafe { trigger_illegal_instruction() };
-
-    // 如果固件/CPU 行为意外让触发函数返回，这本身就是测试失败事实。
     panic!("lesson 05 illegal-instruction trigger unexpectedly returned");
 }
 
 fn stop() -> ! {
     loop {
-        // 当前 trap 报告不可恢复；只稳定等待，不尝试 sret。
         unsafe { asm!("wfi") };
     }
 }
 
-// 汇编只在完整保存 frame 后才调用这个固定 C ABI 符号。
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_trap_handler(frame: *const TrapFrame) -> ! {
-    // SAFETY:
-    // - `trap_entry` 在调用前刚在当前 kernel stack 上分配了 TRAP_FRAME_SIZE；
-    // - 每个字段都已经由汇编初始化；
-    // - sp 仍指向这块 frame，handler 期间不会释放它。
     let frame = unsafe { &*frame };
 
     let interrupt_bit = 1usize << (usize::BITS - 1);
@@ -221,6 +248,5 @@ pub extern "C" fn rust_trap_handler(frame: *const TrapFrame) -> ! {
     crate::println!("trigger={:#x}", expected_trigger);
     crate::println!("trigger_match={}", frame.sepc == expected_trigger);
 
-    // 本课只捕获并解释，不恢复执行；尤其不猜指令长度去 sepc += 4。
     stop()
 }
