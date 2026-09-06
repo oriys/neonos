@@ -11,9 +11,10 @@ lesson03-panic = []
 lesson04-bss-probe = []
 lesson04-skip-bss-clear = []
 lesson05-illegal-trap = []
-
-# 第 07 课：真正执行 sret 进入 U-mode，再由一个用户 ecall 回到可信 S-mode trap 栈。
 lesson07-user-mode = []
+
+# 第 08 课：多次 U-mode ecall，经内核修改 TrapFrame 后恢复全部用户现场并 sret 返回。
+lesson08-syscalls = []
 
 [profile.dev]
 panic = "abort"
