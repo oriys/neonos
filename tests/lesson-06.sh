@@ -21,7 +21,9 @@ fail() {
 }
 
 # 先从 enum 本体确认本课没有偷跑后续状态。
-state_enum=$(sed -n '/pub enum ProcessState {/,/^}/p' src/process.rs)
+# 只依赖类型名和枚举内容，不把 `pub` / `pub(crate)` 这类 Rust 可见性写成课程契约。
+state_enum=$(sed -n '/enum ProcessState {/,/^}/p' src/process.rs)
+[ -n "$state_enum" ] || fail "ProcessState enum not found"
 if printf '%s\n' "$state_enum" | grep -Eq 'Faulted|Blocked'; then
     fail "ProcessState contains a state that belongs to a later lesson"
 fi

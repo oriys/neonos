@@ -12,7 +12,14 @@ SECTIONS
     /* 代码区域使用半开区间 [stext, etext)。 */
     .text : ALIGN(4K) {
         stext = .;
+
+        /* 各课的关键入口明确收集，不依赖后面的宽泛通配恰好命中。 */
         KEEP(*(.text.entry))
+        KEEP(*(.text.trap))
+        KEEP(*(.text.user_enter))
+        KEEP(*(.text.user))
+        KEEP(*(.text.model_program))
+
         *(.text .text.*)
         etext = .;
     }
@@ -31,10 +38,7 @@ SECTIONS
         edata = .;
     }
 
-    /*
-     * 启动栈单独成为一个 NOLOAD 输出 section。
-     * 它仍占运行时内存，但不属于普通 BSS 的主动清零范围。
-     */
+    /* 启动/管理栈独立于普通 BSS 清零范围。 */
     . = ALIGN(4K);
     .boot_stack (NOLOAD) : {
         sboot_stack = .;
@@ -42,13 +46,19 @@ SECTIONS
         eboot_stack = .;
     }
 
-    /*
-     * 普通 BSS 使用独立的 [sbss, ebss) 区间。
-     * `_start` 会在进入 Rust 之前按字节把这个范围清零。
-     */
+    /* 普通 BSS 会在进入 Rust 前由 `_start` 主动清零。 */
     . = ALIGN(4K);
     .bss (NOLOAD) : {
         sbss = .;
+
+        /* 第 07 课第一次真正需要的两类静态运行栈和可信 kernel env。 */
+        KEEP(*(.bss.user_stack))
+        KEEP(*(.bss.user_trap_stack))
+        KEEP(*(.bss.kernel_env))
+
+        /* 第 04 课的清零探针也保持在普通 BSS。 */
+        KEEP(*(.bss.probe))
+
         *(.bss .bss.*)
         *(COMMON)
         ebss = .;

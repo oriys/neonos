@@ -2,17 +2,13 @@
 #![no_std]
 #![no_main]
 
-// 第 02 课：可复用格式化输出。
 mod console;
-
-// 第 04 课：读取 linker symbols，打印并验证真实内存地图。
 mod memory;
-
-// 第 05 课：S-mode trap 入口、TrapFrame 与异常诊断。
 mod trap;
-
-// 第 06 课：Program / Process / ProcessState 最小模型。
 mod process;
+
+// 第 07 课第一次加入真实 U-mode 代码、用户栈和用户来源 trap 入口。
+mod user;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -70,7 +66,6 @@ bss_probe:
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
-    // 第 02 课输出回归。
     crate::println!("Hello kernel");
     crate::println!("count={}", 42);
     crate::println!("addr={:#x}", 0x8020_0000usize);
@@ -78,25 +73,27 @@ pub extern "C" fn rust_main() -> ! {
     crate::print!("left");
     crate::println!(" right");
 
-    // 第 04 课：真实链接布局与 BSS 启动契约。
     memory::report_and_validate();
-
-    // 第 05 课：默认只安装 stvec；故障 feature 会在下一行之后直接进入 trap 并停住。
     trap::init();
 
+    // 第 05 课受控非法指令会直接进入内核 trap 并停止，不污染后续课次。
     #[cfg(feature = "lesson05-illegal-trap")]
     trap::trigger_lesson05();
 
-    // 第 06 课仍然只是 Rust 内核里的模型实验，因此明确输出 `[model]`。
-    // 它不会执行用户指令，也不会使用 sret。
-    process::run_lesson06_model();
+    // 第 06 课模型仍先执行，并返回下一个未使用 PID。
+    let _next_pid = process::run_lesson06_model();
 
-    // 第 03 课的故障注入回归仍然保留。
+    // 第 03 课 panic 回归必须仍能单独运行，所以它优先于第 07 课的“不返回”实验路径。
     #[cfg(feature = "lesson03-panic")]
     {
         lesson03_deliberate_panic();
         crate::println!("SHOULD_NOT_REACH");
     }
+
+    // 默认构建不主动切换特权级；第 07 课 checkpoint 显式开启 feature。
+    // 一旦成功 sret，用户 ecall 会进入可信 trap 栈并由 handler 停住，因此这里不会返回。
+    #[cfg(feature = "lesson07-user-mode")]
+    user::run_lesson07(_next_pid);
 
     halt()
 }
