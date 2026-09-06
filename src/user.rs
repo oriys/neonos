@@ -4,12 +4,13 @@ use core::arch::{asm, global_asm};
 use core::ptr::addr_of;
 
 use crate::process::{AddressRange, Process, ProcessState, Program, UserContext, UserRuntime};
-use crate::trap::{self, TrapFrame, TRAP_FRAME_SIZE};
+use crate::trap::{TrapFrame, TRAP_FRAME_SIZE};
 
 global_asm!(include_str!("user.S"));
 
 unsafe extern "C" {
     fn enter_user_mode(user_sp: usize, entry: usize, sstatus: usize, trap_stack_top: usize);
+    fn trap_entry();
 
     static user_start: u8;
     static user_entry: u8;
@@ -32,6 +33,10 @@ const STACK_BYTES: usize = 16 * 1024;
 
 fn symbol_address(symbol: *const u8) -> usize {
     symbol as usize
+}
+
+fn kernel_trap_entry_address() -> usize {
+    trap_entry as *const () as usize
 }
 
 fn user_code_addresses() -> (usize, usize, usize, usize) {
@@ -238,7 +243,7 @@ pub extern "C" fn rust_user_trap_handler(frame: *const TrapFrame) -> ! {
         trap_stack.start <= frame_address && frame_end <= trap_stack.end;
     let user_sp_ok = user_stack.contains(frame.x[2]) && frame.x[2] & 0xf == 0;
     let sepc_in_user_code = code_start <= frame.sepc && frame.sepc < code_end;
-    let kernel_stvec_restored = read_stvec() == trap::kernel_entry_address();
+    let kernel_stvec_restored = read_stvec() == kernel_trap_entry_address();
 
     crate::println!("[user trap]");
     crate::println!("origin_spp={}", origin_spp);
