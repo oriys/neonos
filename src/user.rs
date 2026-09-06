@@ -1,4 +1,4 @@
-// 第 07 课：第一次真实进入 U-mode，并用一次 ecall 把控制权交回 S-mode。
+// 第 07～08 课：真实 U-mode 运行、用户 trap 证据，以及第一次 syscall 返回。
 
 use core::arch::{asm, global_asm};
 use core::ptr::addr_of;
@@ -8,14 +8,28 @@ use crate::trap::{TrapFrame, TRAP_FRAME_SIZE};
 
 global_asm!(include_str!("user.S"));
 
+#[cfg(all(feature = "lesson07-user-mode", feature = "lesson08-syscalls"))]
+compile_error!("lesson07-user-mode and lesson08-syscalls are mutually exclusive checkpoints");
+
 unsafe extern "C" {
     fn enter_user_mode(user_sp: usize, entry: usize, sstatus: usize, trap_stack_top: usize);
     fn trap_entry();
 
+    // 第 07 课用户程序。
     static user_start: u8;
     static user_entry: u8;
     static user_ecall: u8;
     static user_end: u8;
+
+    // 第 08 课用户程序与所有预期 ecall 位置。
+    static user08_start: u8;
+    static user08_entry: u8;
+    static user08_ecall_unknown: u8;
+    static user08_ecall_invalid: u8;
+    static user08_ecall_o: u8;
+    static user08_ecall_k: u8;
+    static user08_ecall_newline: u8;
+    static user08_end: u8;
 
     static user_stack_start: u8;
     static user_stack_end: u8;
@@ -39,8 +53,7 @@ fn kernel_trap_entry_address() -> usize {
     trap_entry as *const () as usize
 }
 
-fn user_code_addresses() -> (usize, usize, usize, usize) {
-    // SAFETY: 这些符号都由 `user.S` 导出；这里只取得地址。
+fn user07_code_addresses() -> (usize, usize, usize, usize) {
     unsafe {
         (
             symbol_address(addr_of!(user_start)),
@@ -51,8 +64,27 @@ fn user_code_addresses() -> (usize, usize, usize, usize) {
     }
 }
 
+fn user08_code_addresses() -> (usize, usize, usize) {
+    unsafe {
+        (
+            symbol_address(addr_of!(user08_start)),
+            symbol_address(addr_of!(user08_entry)),
+            symbol_address(addr_of!(user08_end)),
+        )
+    }
+}
+
+fn user08_known_ecall(address: usize) -> bool {
+    unsafe {
+        address == symbol_address(addr_of!(user08_ecall_unknown))
+            || address == symbol_address(addr_of!(user08_ecall_invalid))
+            || address == symbol_address(addr_of!(user08_ecall_o))
+            || address == symbol_address(addr_of!(user08_ecall_k))
+            || address == symbol_address(addr_of!(user08_ecall_newline))
+    }
+}
+
 fn stack_ranges() -> (AddressRange, AddressRange, AddressRange) {
-    // SAFETY: 这些边界符号来自 `user.S` 与 linker.ld；这里只取得地址。
     unsafe {
         (
             AddressRange::new(
@@ -74,7 +106,6 @@ fn stack_ranges() -> (AddressRange, AddressRange, AddressRange) {
 fn trusted_user_sstatus() -> usize {
     let value: usize;
 
-    // SAFETY: 当前代码运行在 S-mode，只读取 supervisor status CSR。
     unsafe {
         asm!(
             "csrr {value}, sstatus",
@@ -83,14 +114,13 @@ fn trusted_user_sstatus() -> usize {
         );
     }
 
-    // SPP=0 决定 sret 返回 U-mode。
-    // 本课普通 S interrupt 保持关闭，所以也清 SIE/SPIE，避免继承固件/旧路径状态。
+    // SPP=0：sret 目标是 U-mode。
+    // sie 本课为 0，所以也清 SIE/SPIE，避免把早期实验环境的状态偷偷带入用户现场。
     value & !(SSTATUS_SPP | SSTATUS_SIE | SSTATUS_SPIE)
 }
 
 fn read_sie() -> usize {
     let value: usize;
-    // SAFETY: 只读取 supervisor interrupt-enable CSR。
     unsafe {
         asm!(
             "csrr {value}, sie",
@@ -103,7 +133,6 @@ fn read_sie() -> usize {
 
 fn read_stvec() -> usize {
     let value: usize;
-    // SAFETY: 只读取 supervisor trap-vector CSR。
     unsafe {
         asm!(
             "csrr {value}, stvec",
@@ -120,43 +149,45 @@ fn stop() -> ! {
     }
 }
 
-// 创建一个真实 Process 运行记录，然后把 CPU 从 S-mode 交给它。
-// 这个函数成功时永远不会普通 return：用户 ecall 会进入 rust_user_trap_handler，随后停住。
-pub(crate) fn run_lesson07(pid: u64) -> ! {
-    let (code_start, entry, expected_ecall, code_end) = user_code_addresses();
-    let program = Program::from_linked("user-ecall", entry, code_start, code_end);
-
-    let (user_stack, trap_stack, boot_stack) = stack_ranges();
+fn validate_runtime_ranges(user_stack: AddressRange, trap_stack: AddressRange) {
+    let (_, _, boot_stack) = stack_ranges();
 
     if user_stack.size() != STACK_BYTES || trap_stack.size() != STACK_BYTES {
-        panic!("lesson 07 stack size is not 16 KiB");
+        panic!("user/trap stack size is not 16 KiB");
     }
     if user_stack.overlaps(trap_stack)
         || user_stack.overlaps(boot_stack)
         || trap_stack.overlaps(boot_stack)
     {
-        panic!("lesson 07 stack regions overlap");
+        panic!("user, trap, and boot stack regions overlap");
     }
+}
 
-    // 栈向低地址增长。为了让“保存的 user sp 属于 [start,end)”也能严格成立，
-    // 初值使用 end-16，而不是恰好等于 one-past-end 的 end。
+fn initial_user_sp(user_stack: AddressRange) -> usize {
+    // end 是 one-past-end；使用 end-16 既在范围内，又满足 RISC-V ABI 16-byte 对齐。
     let user_sp = user_stack.end - 16;
     if user_sp & 0xf != 0 || !user_stack.contains(user_sp) {
         panic!("initial user sp is not a 16-byte aligned address inside user stack");
     }
+    user_sp
+}
+
+fn prepare_process<'program>(
+    pid: u64,
+    program: &'program Program,
+    user_stack: AddressRange,
+    trap_stack: AddressRange,
+) -> Process<'program> {
+    validate_runtime_ranges(user_stack, trap_stack);
+
     if trap_stack.end & 0xf != 0 {
         panic!("trap stack top is not 16-byte aligned");
     }
-    if entry & 0x1 != 0 {
+    if program.entry() & 0x1 != 0 {
         panic!("user entry violates current RISC-V instruction alignment");
     }
-    if !program.code_range().contains(expected_ecall) {
-        panic!("user ecall label is outside the linked user code range");
-    }
-
-    // `trap::init()` 已把具体 S interrupt enable 清零；进入用户前再次把它作为前置断言。
     if read_sie() != 0 {
-        panic!("lesson 07 expects sie=0 before entering U-mode");
+        panic!("user-mode lessons expect sie=0 before sret");
     }
 
     let sstatus = trusted_user_sstatus();
@@ -164,21 +195,50 @@ pub(crate) fn run_lesson07(pid: u64) -> ! {
         panic!("trusted user sstatus still has SPP=1");
     }
 
-    let context = UserContext::new(program.entry(), user_sp, sstatus);
+    let context = UserContext::new(program.entry(), initial_user_sp(user_stack), sstatus);
     let runtime = UserRuntime {
         user_stack,
         trap_stack,
         context,
     };
 
-    let mut process = Process::new(pid, &program);
+    let mut process = Process::new(pid, program);
     process.attach_user_runtime(runtime);
     process.start();
 
     if process.state() != ProcessState::Running {
-        panic!("lesson 07 process did not enter Running state");
+        panic!("user process did not enter Running state");
     }
 
+    process
+}
+
+fn enter_process(process: &Process<'_>) -> ! {
+    let runtime = process.user_runtime();
+
+    unsafe {
+        enter_user_mode(
+            runtime.context.x[2],
+            runtime.context.sepc,
+            runtime.context.sstatus,
+            runtime.trap_stack.end,
+        );
+    }
+
+    panic!("enter_user_mode unexpectedly returned");
+}
+
+// ---------- 第 07 课 ----------
+pub(crate) fn run_lesson07(pid: u64) -> ! {
+    let (code_start, entry, expected_ecall, code_end) = user07_code_addresses();
+    let program = Program::from_linked("user-ecall", entry, code_start, code_end);
+    let (user_stack, trap_stack, _) = stack_ranges();
+
+    if !program.code_range().contains(expected_ecall) {
+        panic!("lesson 07 ecall label is outside user code range");
+    }
+
+    let process = prepare_process(pid, &program, user_stack, trap_stack);
     let runtime = process.user_runtime();
 
     crate::println!("[user setup] pid={} program={}", process.id(), process.program().name());
@@ -207,30 +267,11 @@ pub(crate) fn run_lesson07(pid: u64) -> ! {
     crate::println!("[user setup] expected_ecall={:#x}", expected_ecall);
     crate::println!("[user enter]");
 
-    // SAFETY:
-    // - 所有地址都来自当前 ELF 的受控符号并已验证；
-    // - sstatus 由内核构造，SPP=0；
-    // - trap stack 是内核静态 BSS，不来自用户指针；
-    // - 汇编函数不会普通返回，而是执行 sret。
-    unsafe {
-        enter_user_mode(
-            runtime.context.x[2],
-            runtime.context.sepc,
-            runtime.context.sstatus,
-            runtime.trap_stack.end,
-        );
-    }
-
-    panic!("enter_user_mode unexpectedly returned");
+    enter_process(&process)
 }
 
-// 用户 ecall 经过 user_trap_entry 换到可信栈、保存现场、恢复 kernel gp/tp 后进入这里。
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_user_trap_handler(frame: *const TrapFrame) -> ! {
-    // SAFETY: user_trap_entry 已经完整初始化 TrapFrame，再把其起始地址作为 a0 传入。
-    let frame = unsafe { &*frame };
-
-    let (code_start, _, expected_ecall, code_end) = user_code_addresses();
+fn handle_lesson07(frame: &TrapFrame) -> ! {
+    let (code_start, _, expected_ecall, code_end) = user07_code_addresses();
     let (user_stack, trap_stack, _) = stack_ranges();
 
     let interrupt_bit = 1usize << (usize::BITS - 1);
@@ -284,7 +325,113 @@ pub extern "C" fn rust_user_trap_handler(frame: *const TrapFrame) -> ! {
         && kernel_stvec_restored;
 
     crate::println!("user_mode_evidence={}", evidence_ok);
-
-    // 第 07 课故意不恢复用户现场、不执行 sret。
     stop()
+}
+
+// ---------- 第 08 课 ----------
+pub(crate) fn run_lesson08(pid: u64) -> ! {
+    let (code_start, entry, code_end) = user08_code_addresses();
+    let program = Program::from_linked("user-syscalls", entry, code_start, code_end);
+    let (user_stack, trap_stack, _) = stack_ranges();
+
+    let process = prepare_process(pid, &program, user_stack, trap_stack);
+    let runtime = process.user_runtime();
+
+    crate::println!("[syscall setup] pid={} program={}", process.id(), process.program().name());
+    crate::println!("[syscall setup] abi=a7:number,a0:arg0/result");
+    crate::println!("[syscall setup] spp=0");
+    crate::println!("[syscall setup] sepc={:#x}", runtime.context.sepc);
+    crate::println!("[syscall enter]");
+
+    enter_process(&process)
+}
+
+fn handle_lesson08(frame: &mut TrapFrame) {
+    let (code_start, _, code_end) = user08_code_addresses();
+    let (user_stack, trap_stack, _) = stack_ranges();
+
+    let interrupt_bit = 1usize << (usize::BITS - 1);
+    let is_interrupt = frame.scause & interrupt_bit != 0;
+    let cause_code = frame.scause & !interrupt_bit;
+    let origin_spp = (frame.sstatus & SSTATUS_SPP) >> 8;
+    let frame_address = frame as *const TrapFrame as usize;
+    let frame_end = frame_address.checked_add(TRAP_FRAME_SIZE).unwrap_or(usize::MAX);
+    let frame_in_trap_stack =
+        trap_stack.start <= frame_address && frame_end <= trap_stack.end;
+    let user_sp_ok = user_stack.contains(frame.x[2]) && frame.x[2] & 0xf == 0;
+    let sepc_in_user_code = code_start <= frame.sepc && frame.sepc < code_end;
+    let known_ecall = user08_known_ecall(frame.sepc);
+    let kernel_stvec_restored = read_stvec() == kernel_trap_entry_address();
+
+    if origin_spp != 0
+        || is_interrupt
+        || cause_code != 8
+        || !frame_in_trap_stack
+        || !user_sp_ok
+        || !sepc_in_user_code
+        || !known_ecall
+        || !kernel_stvec_restored
+    {
+        panic!(
+            "lesson 08 received unexpected user trap: spp={} interrupt={} cause={} sepc={:#x}",
+            origin_spp,
+            is_interrupt,
+            cause_code,
+            frame.sepc
+        );
+    }
+
+    let number = frame.x[17];
+    let arg0 = frame.x[10];
+    let old_sepc = frame.sepc;
+
+    // 当前已经确认这是本课受控的 32-bit `ecall`，所以成功处理后恰好跳过 4 bytes。
+    let next_sepc = old_sepc
+        .checked_add(4)
+        .unwrap_or_else(|| panic!("syscall sepc overflow"));
+    if next_sepc > code_end {
+        panic!("syscall resume pc escaped user code range");
+    }
+
+    let result = crate::syscall::dispatch(number, arg0);
+
+    // 负错误码在 RV64 a0 中只是二补码 64-bit bit pattern。
+    // `as usize` 保留这组 bits；用户汇编用 `li -1/-2` 比较同一 bit pattern。
+    frame.x[10] = result as usize;
+    frame.sepc = next_sepc;
+
+    // 不信任用户来源的 SPP；返回前再次强制 sret 目标为 U-mode。
+    // 本课还不启用 S interrupts，因此也继续保持 SIE/SPIE 清零。
+    frame.sstatus &= !(SSTATUS_SPP | SSTATUS_SIE | SSTATUS_SPIE);
+
+    // 成功 putchar 本身就是用户可见输出，不额外插入 kernel 日志。
+    // 只记录两个负例，使测试能看到 ABI 的 signed 解释和 PC 推进事实。
+    if result < 0 {
+        crate::println!(
+            "[syscall] number={} arg0={} result={} sepc={:#x} next={:#x}",
+            number,
+            arg0,
+            result,
+            old_sepc,
+            next_sepc
+        );
+    }
+}
+
+// 汇编在可信 trap stack 上构造完整 frame 后调用这里。
+// 第 07 课不会返回；第 08 课处理 syscall 后会普通 return，让 trap.S 恢复用户现场并 sret。
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_user_trap_handler(frame: *mut TrapFrame) {
+    let frame = unsafe { &mut *frame };
+
+    #[cfg(feature = "lesson08-syscalls")]
+    {
+        handle_lesson08(frame);
+        return;
+    }
+
+    #[cfg(feature = "lesson07-user-mode")]
+    handle_lesson07(frame);
+
+    panic!("unexpected user trap without an active user-mode checkpoint");
 }
