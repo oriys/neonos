@@ -2,160 +2,190 @@
 
 课程入口：[neonos × OSTEP](README.md)。
 
-- 当前：第 01 课，待开始。
+- 当前：第 01 课，待开始；完全零基础先做 [第 00 课](00-foundations.md)。
 - 已完成课程：暂无记录。
-- 已有工程基础：Hello kernel 实现和启动检查脚本。
-- 记录原则：代码存在、助手完成实现、学习者完成课程，是不同的状态；按实际实验和理解情况记录。
+- 已有工程基础：仓库已经能启动并输出 `Hello kernel`；这不等于课程已经学会。
+- 记录原则：**代码存在、教材已准备、学习者真正完成实验，是三种不同状态。**
 
 ## 里程碑
 
-第一阶段教材见 [8 次学习安排](stage-01.md)。课程准备完成不代表实验已执行，下表保留真实学习状态。
+| 阶段 | 课程 | 教材状态 | 学习状态 | 验收记录 |
+| --- | --- | --- | --- | --- |
+| 0 预备 | 00 | 已准备 | 待开始 | — |
+| A 内核基础 | 01～05 | 已准备 | 待开始 | — |
+| B 用户程序 | 06～10 | 已准备 | 待开始 | — |
+| C CPU 调度 | 11～15 | 已准备 | 待开始 | — |
+| D 内存虚拟化 | 16～23 | 已准备 | 待开始 | — |
+| E 进程接口与 shell | 24～28 | 已准备 | 待开始 | — |
+| F 并发 | 29～35 | 已准备 | 待开始 | — |
+| G 文件系统 | 36～43 | 已准备 | 待开始 | — |
+| H 崩溃恢复 | 44～47 | 已准备 | 待开始 | — |
 
-| 阶段 | 课程 | 状态 | 验收记录 |
+## 每阶段完成时必须保存什么
+
+每个阶段不是“文档读到最后一页”就算结束。至少保存：
+
+```text
+运行命令
+真实输出/摘要
+成功标记
+一个失败场景
+回归结果
+自己的解释
+```
+
+适用时再记录：
+
+```text
+frame/fd/process/thread/object 数量基线
+地址范围
+磁盘镜像/hash
+故障注入点
+```
+
+复杂阶段建议保存 Git tag，例如：
+
+```text
+stage-01-done
+stage-04-done
+stage-07-done
+stage-08-done
+```
+
+---
+
+# 第一阶段：01～05
+
+教材：[stage-01.md](stage-01.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| A 内核基础 | 01～05 | 待开始 | — |
-| B 用户程序 | 06～10 | 待开始 | — |
-| C CPU 调度 | 11～15 | 待开始 | — |
-| D 内存虚拟化 | 16～23 | 待开始 | — |
-| E 进程接口 | 24～28 | 待开始 | — |
-| F 并发 | 29～35 | 待开始 | — |
-| G 文件系统 | 36～43 | 待开始 | — |
-| H 崩溃恢复 | 44～47 | 待开始 | — |
+| 01 启动链 | [01](01-boot.md) | 待开始 | cargo→QEMU→OpenSBI→_start→UART 可解释 |
+| 02 console | [02](02-console.md) | 待开始 | UART address 与格式化层分离 |
+| 03 panic | [03](03-panic.md) | 待开始 | message/location + deliberate failure |
+| 04 memory/BSS | [04](04-memory-layout.md) | 待开始 | 真实地址图 + nonzero probe→clear→zero |
+| 05 trap | [05](05-traps.md) | 待开始 | CSR/TrapFrame + Rust/asm offset 校验 |
 
-## 每课记录模板
+---
 
-### 第一阶段逐课状态
+# 第二阶段：06～10
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-02.md](stage-02.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 01 启动流程 | [已准备](01-boot.md) | 待开始 | — |
-| 02A 输出模块 | [已准备](02-console.md) | 待开始 | — |
-| 02B 格式化与宏 | [已准备](02-console.md) | 待开始 | — |
-| 03 panic 报告 | [已准备](03-panic.md) | 待开始 | — |
-| 04A 内存地图 | [已准备](04-memory-layout.md) | 待开始 | — |
-| 04B BSS 初始化 | [已准备](04-memory-layout.md) | 待开始 | — |
-| 05A 异常入口 | [已准备](05-traps.md) | 待开始 | — |
-| 05B 异常报告 | [已准备](05-traps.md) | 待开始 | — |
+| 06 Program/Process | [06](06-process.md) | 待开始 | Ready→Running→Exited 最小状态机 |
+| 07 U-mode | [07](07-user-mode.md) | 待开始 | user/trap/management 栈分离，cause=8 |
+| 08 syscall | [08](08-syscalls.md) | 待开始 | ecall +4 边界、register sentinel |
+| 09 exit | [09](09-exit.md) | 待开始 | 有效 exit 不回 user，100 次无栈漂移 |
+| 10 user fault | [10](10-user-errors.md) | 待开始 | Faulted 在本课首次正式引入 |
 
-### 第二阶段逐课状态
+---
 
-第二阶段教材见 [9 次学习安排](stage-02.md)。教材已准备，前置课程和实验仍按实际掌握情况验收。
+# 第三阶段：11～15
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-03.md](stage-03.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 06 程序与进程 | [已准备](06-process.md) | 待开始 | — |
-| 07A 用户程序与栈 | [已准备](07-user-mode.md) | 待开始 | — |
-| 07B 进入用户态 | [已准备](07-user-mode.md) | 待开始 | — |
-| 08A 系统调用分发 | [已准备](08-syscalls.md) | 待开始 | — |
-| 08B 返回用户程序 | [已准备](08-syscalls.md) | 待开始 | — |
-| 09A 退出与继续点 | [已准备](09-exit.md) | 待开始 | — |
-| 09B 顺序运行与回收 | [已准备](09-exit.md) | 待开始 | — |
-| 10A 错误分类 | [已准备](10-user-errors.md) | 待开始 | — |
-| 10B 接口与总验收 | [已准备](10-user-errors.md) | 待开始 | — |
+| 11 scheduling | [11](11-scheduling.md) | 待开始 | response/turnaround 手算与模拟一致 |
+| 12 yield | [12](12-yield.md) | 待开始 | ABABAB + 大量切换栈不增长 |
+| 13 timer | [13](13-timer.md) | 待开始 | TIME/cause=5/绝对 deadline/正确关闭 |
+| 14 preemption | [14](14-preemption.md) | 待开始 | no-yield task 被切换，syscall 不刷新 quantum |
+| 15 MLFQ | [15](15-mlfq.md) | 待开始 | slice/allotment/actual user delta/boost |
 
-### 第三阶段逐课状态
+---
 
-教材入口：[10 次学习安排](stage-03.md)。
+# 第四阶段：16～23
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-04.md](stage-04.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 11 调度模拟 | [已准备](11-scheduling.md) | 待开始 | — |
-| 12A 多任务与队列 | [已准备](12-yield.md) | 待开始 | — |
-| 12B 主动让出 | [已准备](12-yield.md) | 待开始 | — |
-| 13A 单次定时事件 | [已准备](13-timer.md) | 待开始 | — |
-| 13B 持续计时 | [已准备](13-timer.md) | 待开始 | — |
-| 14A 定时抢占 | [已准备](14-preemption.md) | 待开始 | — |
-| 14B 调度边界 | [已准备](14-preemption.md) | 待开始 | — |
-| 15A MLFQ 模拟 | [已准备](15-mlfq.md) | 待开始 | — |
-| 15B 内核 MLFQ | [已准备](15-mlfq.md) | 待开始 | — |
-| 15C 对比与验收 | [已准备](15-mlfq.md) | 待开始 | — |
+| 16 addresses | [16](16-addresses.md) | 待开始 | VA/PA/page offset 两张地图 |
+| 17 frames | [17](17-frames.md) | 待开始 | default Reserved→prove Free，zero reuse |
+| 18 heap | [18](18-heap.md) | 待开始 | `free_bytes + allocated_bytes == arena_size` |
+| 19 Sv39 | [19](19-page-tables.md) | 待开始 | 3-level/PTE/non-leaf invariant |
+| 20 paging | [20](20-paging.md) | 待开始 | satp readback + sfence.vma |
+| 21 AddressSpace | [21](21-address-spaces.md) | 待开始 | same VA→different PPN + safe destroy |
+| 22 user copy | [22](22-page-faults.md) | 待开始 | canonical/U/R/W/ownership/cross-page |
+| 23 TLB/replacement | [23](23-vm-simulation.md) | 待开始 | TLB miss ≠ page fault ≠ swap |
 
-### 第四阶段逐课状态
+---
 
-教材入口：[14 次学习安排](stage-04.md)。教材已准备，学习待开始。
+# 第五阶段：24～28
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-05.md](stage-05.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 16 地址与地图 | [已准备](16-addresses.md) | 待开始 | — |
-| 17A 物理页分配 | [已准备](17-frames.md) | 待开始 | — |
-| 17B 页回收 | [已准备](17-frames.md) | 待开始 | — |
-| 18A 内核堆 | [已准备](18-heap.md) | 待开始 | — |
-| 18B 堆回收 | [已准备](18-heap.md) | 待开始 | — |
-| 19A 页表结构 | [已准备](19-page-tables.md) | 待开始 | — |
-| 19B 页表操作 | [已准备](19-page-tables.md) | 待开始 | — |
-| 20A 内核映射 | [已准备](20-paging.md) | 待开始 | — |
-| 20B 开启分页 | [已准备](20-paging.md) | 待开始 | — |
-| 21A 私有地址空间 | [已准备](21-address-spaces.md) | 待开始 | — |
-| 21B 切换与回收 | [已准备](21-address-spaces.md) | 待开始 | — |
-| 22A 缺页诊断 | [已准备](22-page-faults.md) | 待开始 | — |
-| 22B 用户缓冲区 | [已准备](22-page-faults.md) | 待开始 | — |
-| 23 TLB 与替换模拟 | [已准备](23-vm-simulation.md) | 待开始 | — |
+| 24 exec | [24](24-exec.md) | 待开始 | candidate/commit，old image 未提前破坏 |
+| 25 wait | [25](25-wait.md) | 待开始 | exact status copyout 后才 reap |
+| 26 fork | [26](26-fork.md) | 待开始 | Building child 最后才 Ready |
+| 27 pipe/fd | [27](27-pipes.md) | 待开始 | actual n 验证、peek→exact-copyout→consume |
+| 28 shell | [28](28-shell.md) | 待开始 | idle UART poll、conditional close、>512B pipeline |
 
-### 第五阶段逐课状态
+---
 
-教材入口：[12 次学习安排](stage-05.md)。教材已准备，学习待开始。
+# 第六阶段：29～35
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-06.md](stage-06.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 24A 内嵌加载 | [已准备](24-exec.md) | 待开始 | — |
-| 24B exec | [已准备](24-exec.md) | 待开始 | — |
-| 25A 退出记录 | [已准备](25-wait.md) | 待开始 | — |
-| 25B 等待唤醒 | [已准备](25-wait.md) | 待开始 | — |
-| 26A fork | [已准备](26-fork.md) | 待开始 | — |
-| 26B 生命周期 | [已准备](26-fork.md) | 待开始 | — |
-| 27A 描述符 | [已准备](27-pipes.md) | 待开始 | — |
-| 27B 管道读写 | [已准备](27-pipes.md) | 待开始 | — |
-| 27C 关闭与错误 | [已准备](27-pipes.md) | 待开始 | — |
-| 28A 输入与解析 | [已准备](28-shell.md) | 待开始 | — |
-| 28B 命令执行 | [已准备](28-shell.md) | 待开始 | — |
-| 28C 管道与验收 | [已准备](28-shell.md) | 待开始 | — |
+| 29 logical race | [29](29-races.md) | 待开始 | Atomic+Barrier，无 Rust UB |
+| 30 threads | [30](30-threads.md) | 待开始 | Process resource vs Thread state |
+| 31 atomics | [31](31-atomics.md) | 待开始 | atomic field ≠ atomic invariant |
+| 32 mutex | [32](32-mutex.md) | 待开始 | Blocked + FIFO direct handoff |
+| 33 condvar | [33](33-condvar.md) | 待开始 | release+sleep atomic，reacquire before return |
+| 34 semaphore | [34](34-semaphore.md) | 待开始 | permit direct grant + in-flight accounting |
+| 35 deadlock | [35](35-deadlocks.md) | 待开始 | resource-allocation graph 与 wait-for graph 区分 |
 
-### 第六阶段逐课状态
+---
 
-教材入口：[14 次学习安排](stage-06.md)。教材已准备，学习待开始。
+# 第七阶段：36～43
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-07.md](stage-07.md)
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 29 竞争交错 | [已准备](29-races.md) | 待开始 | — |
-| 30A 线程模型 | [已准备](30-threads.md) | 待开始 | — |
-| 30B 创建退出 | [已准备](30-threads.md) | 待开始 | — |
-| 30C join 与兼容 | [已准备](30-threads.md) | 待开始 | — |
-| 31A 原子操作 | [已准备](31-atomics.md) | 待开始 | — |
-| 31B 锁与中断 | [已准备](31-atomics.md) | 待开始 | — |
-| 32A 睡眠锁 | [已准备](32-mutex.md) | 待开始 | — |
-| 32B 唤醒公平 | [已准备](32-mutex.md) | 待开始 | — |
-| 33A 条件变量 | [已准备](33-condvar.md) | 待开始 | — |
-| 33B 有界队列 | [已准备](33-condvar.md) | 待开始 | — |
-| 34A 计数许可 | [已准备](34-semaphore.md) | 待开始 | — |
-| 34B 信号量队列 | [已准备](34-semaphore.md) | 待开始 | — |
-| 35A 死锁修复 | [已准备](35-deadlocks.md) | 待开始 | — |
-| 35B 事件与验收 | [已准备](35-deadlocks.md) | 待开始 | — |
+| 36 disk | [36](36-disk.md) | 待开始 | bytes/512B sector/4KiB block 区分 |
+| 37 VirtIO READ | [37](37-block-read.md) | 待开始 | queue setup 后 DRIVER_OK、status/used-id/lifetime |
+| 38 WRITE/FLUSH | [38](38-block-write.md) | 待开始 | completion/readback/flush/reboot 四层证据 |
+| 39 cache | [39](39-cache.md) | 待开始 | hit/pin/dirty/needs_flush |
+| 40 format | [40](40-format.md) | 待开始 | explicit offsets/LE/bitmap/layout |
+| 41 inode | [41](41-inodes.md) | 待开始 | reserve all resources before mutation commit |
+| 42 directories | [42](42-directories.md) | 待开始 | parser/lookup 分层，entry 后 publish size |
+| 43 file API/NEX1 | [43](43-file-api.md) | 待开始 | fd/OpenFile/inode，checksum ≠ authentication |
 
-### 第七阶段逐课状态
+---
 
-教材入口：[17 次学习安排](stage-07.md)。教材已准备，学习待开始。
+# 第八阶段：44～47
 
-| 课程 | 教材 | 学习状态 | 实验记录 |
+教材：[stage-08.md](stage-08.md) · 技术协议：[stage-08-protocol.md](stage-08-protocol.md)
+
+> Stage 8 只有一套 crash/commit 定义：**full-block physical redo + transaction staging + COMMITTED FLUSH 唯一 commit point**。
+
+| 学习单元 | 教材 | 状态 | 关键证据 |
 | --- | --- | --- | --- |
-| 36 实验磁盘 | [已准备](36-disk.md) | 待开始 | — |
-| 37A 初始化 | [已准备](37-block-read.md) | 待开始 | — |
-| 37B 读盘 | [已准备](37-block-read.md) | 待开始 | — |
-| 37C 错误与复用 | [已准备](37-block-read.md) | 待开始 | — |
-| 38A 写盘 | [已准备](38-block-write.md) | 待开始 | — |
-| 38B 刷新重启 | [已准备](38-block-write.md) | 待开始 | — |
-| 39A 缓存 | [已准备](39-cache.md) | 待开始 | — |
-| 39B 写回 | [已准备](39-cache.md) | 待开始 | — |
-| 40A 格式 | [已准备](40-format.md) | 待开始 | — |
-| 40B 挂载分配 | [已准备](40-format.md) | 待开始 | — |
-| 41A inode 读取 | [已准备](41-inodes.md) | 待开始 | — |
-| 41B 文件写入 | [已准备](41-inodes.md) | 待开始 | — |
-| 42A 路径 | [已准备](42-directories.md) | 待开始 | — |
-| 42B 创建列举 | [已准备](42-directories.md) | 待开始 | — |
-| 43A 文件接口 | [已准备](43-file-api.md) | 待开始 | — |
-| 43B 磁盘程序 | [已准备](43-file-api.md) | 待开始 | — |
-| 43C shell 验收 | [已准备](43-file-api.md) | 待开始 | — |
+| 44 no-journal crash | [44](44-crash-consistency.md) | 待开始 | 仅在明确 durable checkpoint 下结论 |
+| 45 read-only fsck | [45](45-fsck.md) | 待开始 | structural fsck ≠ semantic old/new oracle |
+| 46 log/staging/commit | [46](46-journal.md) | 待开始 | commit 前 home cache 不偷写；PREPARED=old/COMMITTED=new |
+| 47 recovery | [47](47-recovery.md) | 待开始 | T0/T1 old，T2/T3/T4 new；replay 中断仍幂等 |
 
-### 每次学习记录
+Stage 8 每个 crash case 同时保存三类 oracle：
+
+```text
+journal state
+fsck structural result
+semantic old/new result（file write 还要 exact bytes）
+```
+
+不要把“fsck clean”单独当成 transaction 正确。
+
+---
+
+# 每次学习记录模板
 
 完成课程后复制填写，不提前填入预期结果。
 
@@ -163,9 +193,29 @@
 课次与日期：
 状态：学习中 / 已完成 / 需要复习
 今天要解决的问题：
+开始前预测：
+
 修改了什么：
-运行操作与实际结果：
+运行命令：
+实际输出/摘要：
+失败场景与实际结果：
+回归检查：
+
 我能用自己的话解释：
+本课关键不变量：
+
 还没弄懂的地方：
 下次从哪里继续：
 ```
+
+阶段完成时再额外记录：
+
+```text
+最终验收命令：
+通过的回归测试：
+保留的已知限制：
+checkpoint/tag：
+我现在能够解释的完整数据/控制流：
+```
+
+课程状态只按真实学习结果更新。教材已经准备完成，不等于学习记录可以提前标“已完成”。

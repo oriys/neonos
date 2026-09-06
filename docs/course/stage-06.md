@@ -2,78 +2,219 @@
 
 状态：课程已安排，学习待开始。入口：[总路线](README.md) · [进度记录](progress.md)。
 
-目标：可控重现竞争错误，在共享地址空间中运行教学线程，实现互斥锁、条件变量和信号量，并能解释与修复死锁。
+目标：从确定性逻辑 race 出发，把 scheduler 对象从 Process 拆成 Thread；再实现 user-visible blocking mutex、condition variable、semaphore，并用 wait-for graph 证明/修复 deadlock。
 
-阅读对应 [OSTEP 官方章节](https://pages.cs.wisc.edu/~remzi/OSTEP/) 第 26～33 章。先在宿主机或确定性模拟中理解错误，再把关键机制接入 neonos。线程生命周期和同步接口均是课程约定，不承诺 pthread 兼容。
+阅读 OSTEP 第 26～33 章。宿主机实验用于先理解并发语义，neonos 内核实验用于验证单 hart、timer-preemptive user Threads 与 kernel state machine。
 
-## 前置与 14 次安排
+## 前置
 
-先完成 [第五阶段](stage-05.md)：阻塞与唤醒、用户复制、进程回收及管道稳定。继续单核、内核不可抢占和整数用户样例。本阶段把调度对象从“进程的唯一现场”拆成线程，不能只添加一个共享计数器就算实现线程。
+先完成第五阶段：
 
-每次 45～60 分钟，每周 2～3 次约 5～7 周。复杂课可继续拆分，以下不是日历预约。
+- fork/exec/wait/pipe/shell 稳定；
+- Blocked syscall 采用原 ecall retry；
+- user-copy/fd/ref 生命周期清楚；
+- S-mode kernel 路径仍不在任意 Rust stack 中被 scheduler 抢占；
+- UART idle/timer path 可运行。
 
-| 次数 | 课程 | 当次任务 | 当次成果 |
+## 14 次学习安排
+
+| 次数 | 课程 | 当次问题 | 当次成果 |
 | --- | --- | --- | --- |
-| 1 | [29 竞争与交错](29-races.md) | 拆开读、加、写 | 稳定重现丢失更新 |
-| 2 | [30A 进程与线程](30-threads.md) | 分离共享资源与线程现场 | 调度器按 TID 运行 |
-| 3 | [30B 创建与退出](30-threads.md) | 线程栈、入口、返回包装 | 两线程共享数据、独立执行 |
-| 4 | [30C join 与兼容](30-threads.md) | 回收、旧接口边界 | 线程结束不误释放整个地址空间 |
-| 5 | [31A 原子操作](31-atomics.md) | 原子更新与复合操作 | 区分原子访问和整体互斥 |
-| 6 | [31B 锁与中断](31-atomics.md) | 获取释放、临界区边界 | 解释何时自旋会卡死 |
-| 7 | [32A 睡眠互斥锁](32-mutex.md) | 所有者、等待队列 | 竞争者阻塞，释放后继续 |
-| 8 | [32B 唤醒与公平](32-mutex.md) | 交接、错误调用、回收 | 不漏唤醒、不重复入队 |
-| 9 | [33A 条件变量](33-condvar.md) | 原子释放与等待、重新加锁 | 等待者正确恢复 |
-| 10 | [33B 有界队列](33-condvar.md) | 生产者消费者 | 数据完整且终止明确 |
-| 11 | [34A 计数信号量](34-semaphore.md) | 许可获取与归还 | 活跃使用者不超过容量 |
-| 12 | [34B 信号量队列](34-semaphore.md) | empty/full/mutex | 对比两种同步方案 |
-| 13 | [35A 死锁](35-deadlocks.md) | 可控循环等待、统一锁顺序 | 先解释停滞，再修复 |
-| 14 | [35B 事件驱动与验收](35-deadlocks.md) | 状态机对比、阶段检查 | 能选择并解释同步方式 |
+| 1 | [29 race](29-races.md) | Atomic 访问为什么仍可能逻辑丢更新 | Barrier 确定性 load/store=1，fetch_add=2，无 Rust UB |
+| 2 | [30A Thread 模型](30-threads.md) | Process 与调度实体怎么拆 | scheduler 按 TID，旧单线程 Process 兼容 |
+| 3 | [30B create/return](30-threads.md) | 新 Thread 的入口/stack/return 在哪里 | user return stub、独立 stack/trap context |
+| 4 | [30C exit/join](30-threads.md) | Thread 与 Process 生命周期怎么区分 | join/reap、last-thread→Process Zombie、fault policy |
+| 5 | [31A atomic/invariant](31-atomics.md) | 单字段原子为什么不等于复合事务 | Acquire/Release 最小直觉、统一临界区 |
+| 6 | [31B 单核 kernel 同步](31-atomics.md) | spin/关中断/多核锁为什么不同 | irq save/restore、禁止 irq-off 等另一个 Thread |
+| 7 | [32A blocking mutex](32-mutex.md) | 拿不到 mutex 怎样不 spin | FIFO wait + direct handoff + `MutexGranted` |
+| 8 | [32B 边界](32-mutex.md) | destroy/fault/priority inversion 怎么处理 | generation、pending refs、Process termination policy |
+| 9 | [33A condvar](33-condvar.md) | 如何原子 release+wait 并重新拿锁 | Waiting→Reacquiring→Granted 状态机 |
+| 10 | [33B bounded queue](33-condvar.md) | predicate 为什么必须 while 重查 | 1P1C/2P1C 数据守恒 |
+| 11 | [34A semaphore](34-semaphore.md) | permit 如何 direct grant 不重复计数 | `SemGranted`、count/in-use/pending 守恒 |
+| 12 | [34B semaphore queue](34-semaphore.md) | empty/full/mutex 怎样组合 | 不持 queue mutex 等 permit，和 condvar 对照 |
+| 13 | [35A deadlock](35-deadlocks.md) | timeout 怎样升级成等待环证据 | Coffman 条件、wait-for graph、统一 lock order |
+| 14 | [35B event model](35-deadlocks.md) | blocking Thread 与 event state machine 如何比较 | 同输入结果一致，长 callback/同步边界明确 |
 
-## 共同设计与旧假设修订
+## Thread / Process 不变量
 
-最多 4 个进程，每个最多 4 个线程，使用固定容量表。进程拥有地址空间、fd 表和同步对象表；线程拥有 TID、用户栈及保护页、可信陷入栈、寄存器现场、调度信息与待完成调用。TID 和对象句柄使用代际，避免旧编号误指新对象。
+### Process owns
 
-同进程线程共享用户内存和 fd 表，所以彼此能访问对方用户栈，独立栈不是线程间安全隔离。内核必须按当前线程选择陷入栈。不同进程仍由页表隔离。
+```text
+PID
+AddressSpace
+fd table
+parent/children
+Thread table
+sync object table
+```
 
-保留 `exit=2` 为整个进程退出；新增 `thread_exit` 只结束调用线程。用户线程故障或持有互斥锁时退出，教学版本终止整个进程并清理等待者，不自动解锁后继续使用可能损坏的数据。最后一个活线程结束时生成进程结束记录；正常情况使用最后结束线程的代码。join 只回收线程记录，不回收仍被其他线程使用的根页表。
+### Thread owns
 
-fork/exec 暂仅允许单线程、其他线程已 join、同步对象已销毁的进程，否则返回 -9。用户地址空间在多线程期间不提供 unmap 接口；进程退出先停止全部线程，再回收页面。阻塞 read/write 的 fd 在完成前标记为使用中，其他线程 close 或 dup2 覆盖它返回 -9，避免原第五阶段重试突然操作另一对象。条件改变后仍重新验证用户地址。
+```text
+TID
+user/trap stack
+persistent user context
+Ready/Running/Blocked/Exited state
+MLFQ accounting
+pending syscall/wait state
+```
 
-第五阶段的“无副作用才可重试”仍有效。条件变量等待已经释放锁，必须记录等待与重新加锁的阶段，不能从头重复执行整个调用。调度仍回到中央循环，不在 Rust 栈上保留锁 guard、引用或未完成析构。
+同 Process Thread 共享 AddressSpace，因此能访问彼此 user stack；独立 stack 不是 security isolation。
 
-## 接口约定
+同 Process Thread switch 可保持 `satp` root，但必须换 current TID/context/`sscratch`。跨 Process 继续按 ASID=0 做 root switch + full local `sfence.vma`。
 
-原调用号 1～12 保留。参数从 a0 开始，返回使用有符号 a0；成功操作返回 0，创建操作返回句柄。旧错误码保持，新增 -9 表示忙或当前状态不允许，-10 表示无效 TID、句柄或非所有者操作。
+## 多线程后的旧接口限制
 
-| 调用号 | 接口 | 约定 |
-| --- | --- | --- |
-| 13 | `thread_create(entry, arg)` | 内核分配栈，返回 TID；入口须属于本进程可执行用户区 |
-| 14 | `thread_exit(code)` | 代码 0～255，成功不返回 |
-| 15 | `thread_join(tid, status_ptr)` | 等待同进程线程，写 32 位状态，成功返回 TID |
-| 16 | `mutex_create()` | 创建非递归互斥锁 |
-| 17 | `mutex_lock(handle)` | 可能阻塞，返回时持锁 |
-| 18 | `mutex_unlock(handle)` | 仅所有者可释放 |
-| 19 | `cond_create(mutex_handle)` | 条件变量绑定一个互斥锁 |
-| 20 | `cond_wait(handle)` | 调用前持绑定锁，返回前重新取得锁 |
-| 21 | `cond_signal(handle)` | 持绑定锁唤醒一个；无等待者不存通知 |
-| 22 | `sem_create(initial, max)` | 0≤initial≤max，max 为正且受固定上限限制 |
-| 23 | `sem_wait(handle)` | 获取一个许可，可能阻塞 |
-| 24 | `sem_post(handle)` | 增加或交接一个许可，超上限返回 -2 |
-| 25 | `sync_destroy(handle)` | 对象空闲且无引用、等待者时销毁，否则 -9 |
+第一版为了保持可证明语义：
 
-本阶段 join 只允许一个等待者；自身 join 返回 -9，重复回收或跨进程 TID 返回 -10。等待和唤醒只改变线程状态；MLFQ 用量属于线程，阻塞不重置已用配额。
+```text
+fork/exec
+```
 
-## 计划产物与验收
+只允许当前 Process 只有一个 live Thread、其他 Thread 已 join、无 pending syscall、sync objects 已销毁，否则：
 
-计划新增 `src/thread.rs`、`src/sync.rs` 及其 mutex/condvar/semaphore 子模块，扩展调度和待完成调用记录；宿主机实验 `experiments/races.rs`、`experiments/deadlock.py`；阶段检查 `tests/concurrency.sh`。
+```text
+-9
+```
 
-- [ ] 不依赖未定义行为，竞争错误可稳定重现。
-- [ ] 线程共享地址空间，独立现场与栈，创建退出回收正确。
-- [ ] 互斥计数正确；阻塞不消耗持续自旋的 CPU 时间。
-- [ ] 条件变量原子释放与登记，返回前重新加锁。
-- [ ] 信号量许可和队列数据满足守恒条件。
-- [ ] 死锁有等待关系证据，修复后完成而非只延长超时。
-- [ ] 对象容量满、错误句柄、销毁与线程故障均有明确行为。
-- [ ] 原 shell、管道、内存隔离和调度检查仍通过。
+多线程期间不提供用户可调用的 arbitrary unmap/remap；一次 user-copy 仍在单 hart/nonpreemptive kernel 下拥有稳定 mapping。
 
-下一步进入 [第七阶段块设备与文件系统](stage-07.md)，把数据持久保存到实验磁盘。
+共享 fd table 中，如果一个 Thread Blocked 在 read/write，相关 fd 标记 in-use；其他 Thread close/dup2 覆盖该 fd 返回 -9，避免 retry ecall 操作到新对象。
+
+## kernel 内部同步边界
+
+当前单 hart：
+
+```text
+短 metadata 临界区
+→ save interrupt state
+→ disable relevant S interrupt/preemption entry
+→ bounded state mutation
+→ restore old state
+```
+
+临界区禁止：
+
+- sleep/Blocked；
+- scheduler switch；
+- 等另一个 Thread 才会改变的条件；
+- 慢/无界 UART 打印；
+- 无界 spin。
+
+这不是 SMP lock。未来多 hart 还需要真正跨 hart atomic lock + memory-ordering + TLB/interrupt coordination。
+
+## blocking sync syscall 的 pending completion
+
+### mutex
+
+```text
+Waiting
+→ unlock direct handoff owner=waiter
+→ MutexGranted
+→ 原 ecall 再进 dispatcher
+→ consume pending, return success
+```
+
+### condvar
+
+```text
+CondWaiting
+→ signal
+→ ReacquiringMutex
+→ mutex handoff
+→ CondWaitGranted
+→ return user while owning mutex
+```
+
+### semaphore
+
+```text
+SemWaiting
+→ post direct grant
+→ SemGranted
+→ return without second count--
+```
+
+这些调用已经产生了“登记/释放/permit handoff”等副作用，所以不能像第 25 课普通 wait 一样无脑从头执行普通逻辑。
+
+## user-visible sync ABI
+
+原 1～12 保留：
+
+| a7 | 接口 |
+| ---: | --- |
+| 13 | `thread_create(entry,arg)` |
+| 14 | `thread_exit(code)` |
+| 15 | `thread_join(tid,status_ptr)` |
+| 16 | `mutex_create()` |
+| 17 | `mutex_lock(handle)` |
+| 18 | `mutex_unlock(handle)` |
+| 19 | `cond_create(mutex_handle)` |
+| 20 | `cond_wait(handle)` |
+| 21 | `cond_signal(handle)` |
+| 22 | `sem_create(initial,max)` |
+| 23 | `sem_wait(handle)` |
+| 24 | `sem_post(handle)` |
+| 25 | `sync_destroy(handle)` |
+
+新增错误：
+
+```text
+-9  busy / state not allowed
+-10 invalid TID/handle / cross-process / non-owner
+```
+
+## Thread fault/exit policy
+
+- `thread_exit` 只结束当前 Thread；last live Thread → Process Zombie。
+- Process `exit` 结束所有 Threads。
+- user Thread fault：教学版结束整个 Process，因为 shared AddressSpace 可能已经破坏共享 invariant。
+- Thread 持 mutex 主动 exit：也按 invariant violation 结束 Process，不自动 unlock 后继续。
+- Process cleanup 必须取消所有 wait queues/pending grants、fd pins、sync objects，再释放 AddressSpace。
+
+## stage tests
+
+计划：
+
+```text
+experiments/races.rs
+experiments/deadlock.py
+tests/concurrency.sh
+```
+
+必须区分：
+
+- expected logical-race 负例；
+- expected deadlock（以 wait-for cycle 为通过证据）；
+- fixed positive completion。
+
+正例多轮后检查：
+
+```text
+Thread slots
+Process slots
+sync object count
+wait queues
+pending grants
+fd pins
+pipe refs
+frames
+```
+
+全部回到定义的 baseline。
+
+## 阶段总验收
+
+- [ ] race 实验确定性且无 Rust UB。
+- [ ] Process shared resource / Thread execution state 分离。
+- [ ] user return stub / thread_exit / join / last-thread process completion 正确。
+- [ ] atomic operation 和 compound invariant 能区分。
+- [ ] 单 hart irq masking 与 user spin/SMP lock 边界清楚。
+- [ ] mutex direct handoff 不重复 acquire。
+- [ ] condvar 无 lost wakeup，返回前持 mutex，user while 重查 predicate。
+- [ ] semaphore permit 不重复、不泄漏，binary semaphore 不冒充 mutex。
+- [ ] deadlock 有 wait-for cycle，lock ordering 修复只在覆盖范围内成立。
+- [ ] deadlock/starvation/livelock/event-driven 区分明确。
+- [ ] 旧 shell/pipe/process/memory/scheduling tests 全回归。
+
+通过后进入 [第七阶段：块设备与文件系统](stage-07.md)。
