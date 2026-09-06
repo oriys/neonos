@@ -25,9 +25,10 @@ fail() {
 grep -Fq '.checked_add(4)' src/user.rs || fail "recognized ecall no longer advances sepc by checked +4"
 grep -Fq 'frame.x[10] = result as usize' src/user.rs || fail "syscall result is not written back to saved a0"
 
-restore_t0=$(grep -n -m 1 -F 'ld t0, {x5}(sp)' src/trap.S | tail -n 1 | cut -d: -f1 || true)
-restore_stack=$(grep -n -m 1 -F 'csrrw sp, sscratch, sp' src/trap.S | tail -n 1 | cut -d: -f1 || true)
-resume=$(grep -n -m 1 -F 'sret' src/trap.S | tail -n 1 | cut -d: -f1 || true)
+# 这里只匹配真正的汇编指令行，不让注释中的 `sret` / `csrrw` 字样产生假阳性。
+restore_t0=$(grep -n -E '^[[:space:]]*ld t0, \{x5\}\(sp\)[[:space:]]*$' src/trap.S | tail -n 1 | cut -d: -f1 || true)
+restore_stack=$(grep -n -E '^[[:space:]]*csrrw sp, sscratch, sp[[:space:]]*$' src/trap.S | tail -n 1 | cut -d: -f1 || true)
+resume=$(grep -n -E '^[[:space:]]*sret[[:space:]]*$' src/trap.S | tail -n 1 | cut -d: -f1 || true)
 [ -n "$restore_t0" ] || fail "user t0 restore is missing"
 [ -n "$restore_stack" ] || fail "final user/trap stack swap is missing"
 [ -n "$resume" ] || fail "user sret resume is missing"
