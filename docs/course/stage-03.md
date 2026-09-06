@@ -2,66 +2,128 @@
 
 状态：课程已安排，学习待开始。入口：[总路线](README.md) · [进度记录](progress.md)。
 
-目标：从第二阶段的顺序执行走到主动切换和定时抢占，并用可复现的实验比较轮转与多级反馈队列（MLFQ）。
+目标：从第二阶段的单用户顺序运行，走到主动切换、timer 抢占和规则明确的简化 MLFQ；同时能用响应/周转等指标比较策略，而不是只凭“看起来更流畅”。
 
-教材对应 [OSTEP 官方目录](https://pages.cs.wisc.edu/~remzi/OSTEP/) 第 7 章 CPU Scheduling、第 8 章 Multi-level Feedback、第 9 章 Lottery Scheduling；第 6 章用于复习控制权。彩票调度先做模拟，多核调度留到进阶。
+阅读 OSTEP 第 7～9 章；第 6 章用于复习内核如何重新取得控制权。彩票调度只做可选模拟，多核调度留到进阶。
 
 ## 开始前检查
 
-先完成 [第二阶段](stage-02.md)：用户请求可返回，退出与用户故障能回到内核管理流程，用户栈和内核栈切换正确。第三阶段需要扩展已有 `Process`、`TrapFrame`、`KernelContext`；课程文件已准备不代表这些代码已实现。
+先完成 [第二阶段](stage-02.md)：
+
+- U-mode/syscall/exit/fault 控制流稳定；
+- 用户 TrapFrame 能正确恢复；
+- `run_user`/KernelContext 能安全回管理栈；
+- `tests/user.sh` 不只匹配早期输出。
+
+本阶段在这些机制上扩展，不重新复制第二套用户入口。
 
 ## 10 次学习安排
 
-每次 45～60 分钟，每周 2～3 次，约 4～5 周。汇编或计时调试可拆成更多次，以下不是日历预约。
-
-| 次数 | 课程 | 当次任务 | 当次成果 |
+| 次数 | 课程 | 当次问题 | 当次成果 |
 | --- | --- | --- | --- |
-| 1 | [11 调度模拟](11-scheduling.md) | 手算并模拟 FCFS、SJF、RR | 能比较响应时间与周转时间 |
-| 2 | [12A 多个就绪任务](12-yield.md) | 固定进程表、独立现场、就绪队列 | 多任务资源不重叠，队列无重复 |
-| 3 | [12B 主动切换](12-yield.md) | `yield` 与恢复用户现场 | A、B 交替前进，各自计数正确 |
-| 4 | [13A 预约时钟事件](13-timer.md) | 时间单位、SBI TIME、一次定时事件 | 可识别真正的定时器中断 |
-| 5 | [13B 持续计时](13-timer.md) | 重新预约、单任务返回、有限日志 | 多次事件持续发生，现场未损坏 |
-| 6 | [14A 定时抢占](14-preemption.md) | 定时事件接入轮转 | 不调用 `yield` 的任务也会切换 |
-| 7 | [14B 调度边界](14-preemption.md) | 退出、故障、临界区与完整检查 | 一个任务结束不影响其他任务 |
-| 8 | [15A 多级队列模拟](15-mlfq.md) | 优先级、配额、降级和提升 | 用确定性轨迹理解规则 |
-| 9 | [15B 内核 MLFQ](15-mlfq.md) | 替换选择策略，累计 CPU 用量 | 配额跨 `yield` 保留，任务按规则降级 |
-| 10 | [15C 对比与总验收](15-mlfq.md) | 相同负载对比 RR 和 MLFQ | 用数据解释收益和代价 |
+| 1 | [11 调度模拟](11-scheduling.md) | “更好”用什么指标衡量 | 手算并模拟 FCFS/SJF/RR，事件顺序明确 |
+| 2 | [12A 多任务与队列](12-yield.md) | 多个任务的现场放哪里 | 固定任务表、Ready queue、persistent context |
+| 3 | [12B 主动切换](12-yield.md) | 怎样从 yield 后继续 | A/B 可交替，压力切换管理栈不增长 |
+| 4 | [13A one-shot timer](13-timer.md) | 怎样预约未来自动 trap | SBI TIME + 单用户 timer trap，原因识别正确 |
+| 5 | [13B 连续 timer](13-timer.md) | 怎样持续预约而不破坏现场 | 10+ 次事件、日志有界、关闭语义明确 |
+| 6 | [14A 抢占 RR](14-preemption.md) | 不 yield 的任务怎么轮换 | timer + Ready queue，长计算任务可抢占 |
+| 7 | [14B 边界与回归](14-preemption.md) | syscall/exit/fault 怎么和时间片共存 | syscall 不刷新 quantum，内核不做未支持的嵌套抢占 |
+| 8 | [15A MLFQ 模拟](15-mlfq.md) | slice/allotment/boost 怎样定义 | 高频 yield 不能逃避累计配额 |
+| 9 | [15B 内核 MLFQ](15-mlfq.md) | 怎样按真实用户执行区间计费 | `last_user_enter` + 剩余预算，最早 deadline 预约 |
+| 10 | [15C 对比](15-mlfq.md) | RR 与 MLFQ 如何公平比较 | 同输入指标表，不预设赢家 |
 
-## 本阶段共同设计
+## 本阶段共同不变量
 
-保持单核、固定容量、内嵌整数用户程序，尚无页表隔离。每个任务拥有独立用户栈、陷入栈和持久保存的用户现场。设最多 4 个任务，容量满时返回明确错误。
+### 调度对象
 
-采用一个中央调度循环：用户陷入后，Rust 处理函数先正常返回汇编；汇编按结果恢复用户或回到调度栈。发生调度时先把用户现场保存到进程记录，再回到中央循环选择下一个任务。不把悬空指向旧栈帧的引用当作持久现场，不跨切换保留 Rust 可变借用或待析构资源。
+保持最多 4 个受控用户任务。每个任务有独立 user stack、trap stack 和 persistent user context。
 
-本阶段没有可暂停的内核系统调用，也没有睡眠队列。所有内核处理在返回用户或进入调度循环前完成，因而不需要为每个任务挂起任意 Rust 内核调用栈。
+```text
+Ready queue 只含 Ready
+同一 task 最多出现一次
+最多一个 Running
+Exited/Faulted 永不重新入队
+```
 
-| 新约定 | 定义 |
-| --- | --- |
-| `yield` | 自定义系统调用号 `a7=3`，无参数，再次运行时返回 `a0=0` |
-| 状态转换 | `Ready → Running → Ready/Exited/Faulted` |
-| 调度原因 | 主动让出、时间片用完、退出、用户故障 |
-| 就绪队列 | 只放 Ready 任务编号，同一任务最多出现一次 |
-| 空队列 | 本阶段无未来 I/O 唤醒；全部结束时停止定时器，输出完成标记 |
+### 所有切换回中央 scheduler
 
-第二阶段的 `putchar=1`、`exit=2` 和错误码保持一致。系统调用返回需要越过 `ecall`；定时中断恢复原指令位置，不通用地增加 `sepc`。
+```text
+user trap
+→ Rust handler 返回 action
+→ 汇编恢复管理 KernelContext
+→ 一个中央 scheduler loop
+→ 选择/dispatch
+```
 
-前两课关闭定时器。第 13 课单独建立可返回的计时路径；第 14 课开始仅在用户执行期间触发抢占，内核调度、打印和现场切换期间不开放嵌套中断。内核故障仍报告并停止。
+不在每次 yield/timer 里递归进入新的 scheduler Rust 调用栈。
 
-## 实验与度量
+### timer 与 syscall 的 `sepc` 规则不同
 
-第 11、15A 课的模拟使用离散时间单位、固定输入与固定事件顺序；内核记录真实时间计数或明确标注的计数单位。不要把 QEMU 下的 tick 当作宿主机毫秒，也不要根据串口输出速度判断公平性。
+```text
+已处理 U-mode ecall → sepc + 4
+interrupt            → 保持 sepc
+unknown user fault   → 本阶段结束任务，不擅自跳过
+```
 
-计划新增 `src/scheduler.rs`、`src/timer.rs`、`src/sbi.rs`、宿主机模拟脚本 `experiments/scheduling.py`、`experiments/mlfq.py` 和 `tests/scheduling.sh`，并扩展第二阶段代码。模拟脚本运行在宿主机，不使用仓库默认的裸机 Rust 目标。
+### 本阶段内核不支持嵌套 timer 抢占
 
-## 总验收
+U-mode 可以被 timer 打断；S-mode trap/scheduler/console 更新期间保持同级中断关闭。timer 到期可以推迟到安全边界，不宣称硬实时。
 
-- [ ] 能手算响应和周转时间，并与模拟结果一致。
-- [ ] 主动让出后，两任务的寄存器和用户栈内容各自保持正确。
-- [ ] 真正的定时中断反复发生，事件处理后重新设置期限。
-- [ ] 不调用 `yield` 的任务也能被抢占，日志记录原因。
-- [ ] 单任务、队列空、队列满、退出和用户故障均有明确行为。
-- [ ] MLFQ 的降级、周期提升、配额累计符合已写出的规则。
-- [ ] 对相同输入分别记录 RR 与 MLFQ 的结果，不预设哪一个一定更好。
-- [ ] 已有启动、用户接口检查与新增调度检查通过，保存真实记录。
+### RR 普通 syscall 不刷新 quantum
 
-完成后进入 [第四阶段内存虚拟化](stage-04.md)，让这些任务进一步拥有隔离的地址空间。
+新 quantum 只在 scheduler 真正 dispatch 新一轮时产生。普通 syscall 返回原任务保持旧 deadline/预算，避免 syscall-heavy 任务作弊。
+
+### MLFQ 按用户执行区间计账
+
+每次返回用户记录 `last_user_enter`；每次从用户 trap 回来先扣实际 delta。不能只数 timer interrupt 次数。
+
+## 阶段测试
+
+计划产物：
+
+```text
+src/scheduler.rs
+src/sbi.rs
+src/timer.rs
+experiments/scheduling.py
+experiments/mlfq.py
+tests/scheduling.sh
+```
+
+宿主机模拟脚本不使用默认裸机 Rust target；Python 脚本直接在宿主机运行。
+
+`scheduling.sh` 必须等待最终标记，并检查：
+
+- timer switch reason 真实存在；
+- 每个任务完成/故障次数；
+- 计算 checksum；
+- Ready queue/终态不变量；
+- 无意外 panic/kernel fault；
+- 超时能打印当前 task/queue/deadline，而不是静默失败。
+
+## 阶段总验收
+
+- [ ] 手算 response/turnaround 与模拟一致。
+- [ ] yield 后多个任务从自己的旧位置恢复，管理栈不持续增长。
+- [ ] one-shot/连续 SBI timer 可复现，单位来源有记录。
+- [ ] 两个不 yield 的长任务能被 timer 抢占完成。
+- [ ] 普通 syscall 不获得完整新 RR quantum。
+- [ ] MLFQ 频繁 yield/syscall 仍累计用量并按规则降级。
+- [ ] periodic boost/最低队列 RR 有确定轨迹。
+- [ ] RR/MLFQ 用同一输入比较，结论由数据支持。
+- [ ] 既有 boot/user tests 和新增 scheduling test 全部通过。
+
+进入第四阶段前，应能画出：
+
+```text
+用户执行
+→ syscall/yield/timer/fault
+→ trap
+→ 保存 persistent context
+→ scheduler policy
+→ 选择任务
+→ 恢复 context
+→ sret
+```
+
+完成记录后进入 [第四阶段：让每个进程拥有自己的内存空间](stage-04.md)。
