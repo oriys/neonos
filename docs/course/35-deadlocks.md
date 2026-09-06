@@ -37,7 +37,7 @@
 4. Circular wait      等待关系形成环
 ```
 
-本课用 mutex 构造全部四个。
+本课用两个 non-recursive mutex 构造全部四个。
 
 ### 目标等待关系
 
@@ -46,20 +46,58 @@ Thread A owns L1, waits L2
 Thread B owns L2, waits L1
 ```
 
-画成 wait-for graph：
+这里要准确区分两张常被混叫的图。
+
+### Resource-allocation graph：线程和资源都作为节点
 
 ```text
 A → L2 → B → L1 → A
 ```
 
-其中：
+本课程约定：
 
 ```text
-Thread → Lock = waiting for
-Lock → Thread = owned by
+Thread → Lock = request / waiting for
+Lock   → Thread = allocation / owned by
 ```
 
-这个环才是本实验的核心证据。
+因为图中同时存在 Thread 和 Lock 两类节点，这张二部图叫：
+
+```text
+resource-allocation graph（资源分配图）
+```
+
+不要把它直接叫 wait-for graph。
+
+### Wait-for graph：把资源节点消掉
+
+对于当前这种每把 mutex 只有一个 owner 的模型，可以把：
+
+```text
+A waits L2, L2 owned by B
+```
+
+压缩成：
+
+```text
+A → B
+```
+
+同理：
+
+```text
+B → A
+```
+
+因此真正的 wait-for graph 是：
+
+```text
+A → B → A
+```
+
+这个 Thread-to-Thread cycle 才是本课用来证明两者互相等待的直接证据。
+
+> 在当前“单实例 mutex + 两个 Thread 都已 Blocked 等待对方所持锁”的受控场景中，wait-for cycle 可以确定证明 deadlock；不要把这句话推广到任意复杂多实例资源模型而不重新分析。
 
 ## 不靠 sleep 碰运气
 
@@ -87,7 +125,7 @@ B 请求 L1
 
 测试 gate 不是 mutex 实现的一部分，也不能依赖 L1/L2 的错误获取顺序才能自身完成；它只是确定性实验控制器。
 
-## 观察器要输出真正的等待图
+## 观察器要输出足够的信息构造两张图
 
 在独立 QEMU 测试模式中，有限时间后由测试管理/诊断路径打印：
 
@@ -99,13 +137,19 @@ L2.owner = B
 Ready queue = ...
 ```
 
-然后生成/人工画出：
+由这些事实先得到 resource-allocation graph：
 
 ```text
 A → L2 → B → L1 → A
 ```
 
-超时本身只触发“采样诊断”；**检测到环**才是“这个负例符合预期死锁”的通过证据。
+再派生 wait-for graph：
+
+```text
+A → B → A
+```
+
+超时本身只触发“采样诊断”；**检测到符合当前模型的 wait-for cycle**才是这个负例的通过证据。
 
 测试完成后由 harness 结束该 QEMU 会话，不把 deadlocked kernel 留给后续正例。
 
@@ -165,7 +209,7 @@ B 先拿 L2
 ```text
 两 Thread 都完成
 共享结果正确
-wait-for graph 无 cycle
+resource-allocation / wait-for 关系中无 cycle
 ```
 
 ---
@@ -196,8 +240,9 @@ CPU 很忙
 
 ### A 次验收
 
-- [ ] 错误版稳定得到 L1/L2 wait cycle。
-- [ ] 负例通过条件包含“检测到等待环”，不是只看 timeout。
+- [ ] 错误版稳定得到 `A→L2→B→L1→A` 的资源分配环。
+- [ ] 能从它派生 `A→B→A` 的 wait-for cycle。
+- [ ] 负例通过条件包含 cycle 证据，不是只看 timeout。
 - [ ] 统一 lock order 后两个 Thread 都完成。
 - [ ] 正例测试 gate 不再依赖旧错误顺序。
 - [ ] 能区分 deadlock/starvation/livelock。
@@ -316,7 +361,9 @@ Event 模型：显式 state，没有每个任务的阻塞 stack，但控制流�
 检查：
 
 ```text
-wait-for cycle 存在
+resource allocation/ownership 与 blocked reason 一致
+AND
+可派生 Thread→Thread wait-for cycle
 ```
 
 然后 harness 主动结束会话。
@@ -358,7 +405,7 @@ Ready/Blocked waiters 清空
 
 ### 停滞诊断
 
-- [ ] deadlock 有 wait-for cycle 证据。
+- [ ] deadlock 有 resource-allocation 事实和派生 wait-for cycle 证据。
 - [ ] 统一 lock order 修复后完成。
 - [ ] 能区分 deadlock/starvation/livelock。
 - [ ] event-state-machine 对照不把长阻塞 callback 偷偷塞回 event loop。
@@ -375,10 +422,11 @@ Ready/Blocked waiters 清空
 
 1. Coffman 四个条件是什么？
 2. 为什么 timeout 不能单独证明 deadlock？
-3. wait-for graph 中 Thread→Lock 和 Lock→Thread 各代表什么？
-4. 统一 lock order 消除的是哪个条件？为什么只对受这套顺序覆盖的资源成立？
-5. starvation 和 deadlock 的系统级进展有什么区别？
-6. livelock 为什么可能 CPU 很忙却没工作完成？
-7. event-driven 为什么不自动等于“完全不需要同步”？
+3. resource-allocation graph 中 Thread→Lock 和 Lock→Thread 各代表什么？
+4. 怎样从 `A→L2→B→L1→A` 派生真正的 wait-for graph？
+5. 统一 lock order 消除的是哪个条件？为什么只对受这套顺序覆盖的资源成立？
+6. starvation 和 deadlock 的系统级进展有什么区别？
+7. livelock 为什么可能 CPU 很忙却没工作完成？
+8. event-driven 为什么不自动等于“完全不需要同步”？
 
 完成 [第六阶段总验收](stage-06.md) 并更新 [进度记录](progress.md)。下一步从 [第 36 课：先准备一块实验磁盘](36-disk.md) 进入持久化。
