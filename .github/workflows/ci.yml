@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    runs-on: macos-26
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install prerequisites
+        run: |
+          rustup target add riscv64gc-unknown-none-elf
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install qemu
+      - name: Build and boot kernel
+        run: ./tests/boot.sh
