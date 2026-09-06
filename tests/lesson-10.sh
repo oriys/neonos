@@ -21,14 +21,15 @@ fail() {
     exit 1
 }
 
-# 先验证实现边界：Faulted 是结构化终态，用户 API 不直接碰 UART。
+# 先验证实现边界：Faulted 是结构化终态，用户 API 不直接碰 UART MMIO。
 grep -Fq 'struct FaultInfo' src/process.rs || fail "FaultInfo is missing"
 grep -Fq 'Faulted(FaultInfo)' src/process.rs || fail "Faulted process state is missing"
 grep -Fq 'fn finish_fault' src/process.rs || fail "Running -> Faulted commit API is missing"
 grep -Fq 'user_api_putchar:' src/user_api.S || fail "user putchar wrapper is missing"
 grep -Fq 'user_api_exit:' src/user_api.S || fail "user exit wrapper is missing"
-if grep -Eq '0x10000000|UART' src/user_api.S; then
-    fail "user API wrapper bypasses syscall boundary"
+# 注释里可以解释 UART；真正禁止的是把 QEMU virt UART MMIO 地址写进用户 wrapper。
+if grep -Eiq '0x0*10000000|0x1000_0000' src/user_api.S; then
+    fail "user API wrapper contains the UART MMIO address"
 fi
 grep -Fq 'call rust_user_trap_dispatch' src/trap.S || fail "user trap entry does not use shared dispatcher"
 
