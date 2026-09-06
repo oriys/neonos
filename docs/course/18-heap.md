@@ -169,14 +169,20 @@ Free 与 Allocated 不重叠
 所有区间都在 arena 内
 ```
 
-可进一步统计：
+由于本课规定：
+
+- allocator 元数据放在 arena 外的固定静态数组；
+- alignment 产生的 prefix/suffix 必须继续留在 free list；
+- 本课没有额外隐藏 header 占用 arena 字节；
+
+所以还应有一个更强的守恒式：
 
 ```text
 sum(free sizes) + sum(allocated sizes)
-<= arena size
+== arena size
 ```
 
-小于 arena 的部分只能来自你明确记录的管理/对齐策略；不能凭空丢字节。
+如果小于 `arena size`，说明有字节被 allocator 悄悄“弄丢”了；这在本课设计里不是允许的 alignment 开销，而是需要定位的 bug。
 
 ---
 
@@ -279,6 +285,7 @@ largest free interval
 | --- | --- |
 | 返回地址不满足 align | 是否只对 size 取整，而没对 start 对齐 |
 | 分配几次后总 free 莫名减少 | alignment prefix/suffix 是否丢失 |
+| `free + allocated` 小于 arena | 是否有某段字节未被任何记录覆盖 |
 | 释放全部却不能恢复大块 | free list 是否按地址排序并合并相邻块 |
 | total free 足够仍失败 | largest contiguous free 是否不足 |
 | metadata 满后 arena 少一块 | 失败前是否已经修改原 free list |
@@ -292,6 +299,7 @@ largest free interval
 - [ ] checked arithmetic 覆盖上溢。
 - [ ] metadata 不足和 memory 不足都是无副作用失败。
 - [ ] prefix/suffix 没有被静默丢失。
+- [ ] `sum(free) + sum(allocated) == arena size` 始终成立。
 - [ ] 无效/double free 被拒绝。
 - [ ] 释放全部后 arena 恢复成一个完整 free interval。
 - [ ] external fragmentation 场景可重复解释。
@@ -304,9 +312,10 @@ largest free interval
 1. fixed-size frame allocator 和 variable-size heap 分别解决什么问题？
 2. alignment 为什么可能产生 prefix？
 3. 为什么 allocator 失败前要先确认 metadata 也有容量？
-4. total free 和 largest free block 为什么要同时看？
-5. 两个 free interval 什么条件下才能合并？
-6. 为什么当前 handle allocator 不能直接声称实现了 Rust `GlobalAlloc`？
+4. 为什么本课里 `free + allocated` 必须严格等于 arena，而不能只是小于等于？
+5. total free 和 largest free block 为什么要同时看？
+6. 两个 free interval 什么条件下才能合并？
+7. 为什么当前 handle allocator 不能直接声称实现了 Rust `GlobalAlloc`？
 
 ## 下一课为什么自然出现
 
