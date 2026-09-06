@@ -1,8 +1,8 @@
-# 第 05～09 课共用的 S-mode trap 汇编。
+# 第 05～10 课共用的 S-mode trap 汇编。
 #
 # `trap_entry`：内核自身故障入口，进入时 sp 已可信；只报告并停机。
 # `user_trap_entry`：用户来源入口，先切可信 trap 栈，再保存完整用户现场。
-# Rust user trap handler 返回：
+# Rust user trap dispatcher 返回：
 #   a0 = 0  -> ResumeUser：从 TrapFrame 恢复并 sret
 #   a0 = 1  -> TerminateProcess：放弃用户现场，恢复 run_user 保存的 KernelContext
 #
@@ -132,7 +132,7 @@ user_trap_entry:
     # a0 返回的是“汇编下一步做什么”，不是用户 syscall result。
     # 用户 result 已由 Rust 写回 frame.x10。
     mv a0, sp
-    call rust_user_trap_handler
+    call rust_user_trap_dispatch
 
     li t0, 1
     beq a0, t0, terminate_process

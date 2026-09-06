@@ -20,16 +20,19 @@ fail() {
     exit 1
 }
 
-# 先从 enum 本体确认本课没有偷跑后续状态。
-# 只依赖类型名和枚举内容，不把 `pub` / `pub(crate)` 这类 Rust 可见性写成课程契约。
+# 第 06 课最初只有 Ready/Running/Exited；课程继续到第 10 课后 Faulted 会合法加入。
+# 历史 checkpoint 仍应保证前三个状态存在，同时禁止更晚才应出现的 Blocked。
 state_enum=$(sed -n '/enum ProcessState {/,/^}/p' src/process.rs)
 [ -n "$state_enum" ] || fail "ProcessState enum not found"
-if printf '%s\n' "$state_enum" | grep -Eq 'Faulted|Blocked'; then
-    fail "ProcessState contains a state that belongs to a later lesson"
+if printf '%s\n' "$state_enum" | grep -Eq 'Blocked'; then
+    fail "ProcessState contains Blocked before the scheduling lesson introduces it"
 fi
 printf '%s\n' "$state_enum" | grep -Fq 'Ready' || fail "Ready state missing"
 printf '%s\n' "$state_enum" | grep -Fq 'Running' || fail "Running state missing"
 printf '%s\n' "$state_enum" | grep -Fq 'Exited' || fail "Exited state missing"
+if printf '%s\n' "$state_enum" | grep -Fq 'Faulted'; then
+    grep -Fq 'struct FaultInfo' src/process.rs || fail "Faulted exists without structured FaultInfo"
+fi
 
 cargo build
 

@@ -16,6 +16,9 @@ lesson08-syscalls = []
 # 第 09 课：有效 exit 返回内核管理调用链，非法 exit 仍恢复用户；随后重复运行 100 次。
 lesson09-exit = []
 
+# 第 10 课：区分受控用户 fault 与内核 fault；fault 后内核继续运行下一个用户程序。
+lesson10-user-errors = []
+
 [profile.dev]
 panic = "abort"
 
