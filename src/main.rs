@@ -7,6 +7,8 @@ mod memory;
 mod trap;
 mod process;
 mod user;
+mod user10;
+mod user_dispatch;
 mod syscall;
 
 use core::arch::{asm, global_asm};
@@ -97,6 +99,11 @@ pub extern "C" fn rust_main() -> ! {
     // Rust 管理流程随后提交 Process=Exited、清理栈，并顺序重复运行 100 次。
     #[cfg(feature = "lesson09-exit")]
     user::run_lesson09(_next_pid);
+
+    // 第 10 课：受控用户 fault 复用相同 KernelContext 返回桥，
+    // 管理流程提交 Faulted 后继续启动另一个正常用户程序。
+    #[cfg(feature = "lesson10-user-errors")]
+    user10::run_lesson10(_next_pid);
 
     halt()
 }
