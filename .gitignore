@@ -1,3 +1,6 @@
 # 忽略 Cargo 编译生成的 `target` 目录。
 # 这个目录里主要是编译产物和缓存，可以随时重新生成，通常不应该提交到 Git。
 /target
+
+# Python simulation/test caches are not course artifacts.
+__pycache__/

@@ -13,6 +13,9 @@ SECTIONS
         KEEP(*(.text.trap))
         KEEP(*(.text.user_enter))
         KEEP(*(.text.user))
+        KEEP(*(.text.user10))
+        KEEP(*(.text.user_scheduler))
+        KEEP(*(.text.user_api))
         KEEP(*(.text.model_program))
         *(.text .text.*)
         etext = .;

@@ -15,6 +15,13 @@ lesson08-syscalls = []
 
 # 第 09 课：有效 exit 返回内核管理调用链，非法 exit 仍恢复用户；随后重复运行 100 次。
 lesson09-exit = []
+lesson10-user-errors = []
+lesson10-kernel-fault = ["lesson10-user-errors"]
+scheduling = []
+lesson12-yield = ["scheduling"]
+lesson13-timer = ["scheduling"]
+lesson14-preemption = ["scheduling"]
+lesson15-mlfq = ["scheduling"]
 
 [profile.dev]
 panic = "abort"

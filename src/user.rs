@@ -7,9 +7,9 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::process::{AddressRange, Process, ProcessState, Program, UserContext, UserRuntime};
 use crate::syscall::SyscallOutcome;
 use crate::trap::{
-    KCTX_GP, KCTX_RA, KCTX_S0, KCTX_S1, KCTX_S2, KCTX_S3, KCTX_S4, KCTX_S5, KCTX_S6,
-    KCTX_S7, KCTX_S8, KCTX_S9, KCTX_S10, KCTX_S11, KCTX_SP, KCTX_TP,
-    KERNEL_CONTEXT_SIZE, TRAP_FRAME_SIZE, TrapFrame,
+    KCTX_GP, KCTX_RA, KCTX_S0, KCTX_S1, KCTX_S2, KCTX_S3, KCTX_S4, KCTX_S5, KCTX_S6, KCTX_S7,
+    KCTX_S8, KCTX_S9, KCTX_S10, KCTX_S11, KCTX_SP, KCTX_TP, KERNEL_CONTEXT_SIZE, TRAP_FRAME_SIZE,
+    TrapFrame,
 };
 
 global_asm!(
@@ -34,11 +34,21 @@ global_asm!(
 );
 
 #[cfg(any(
+    all(
+        feature = "lesson10-user-errors",
+        any(
+            feature = "lesson07-user-mode",
+            feature = "lesson08-syscalls",
+            feature = "lesson09-exit"
+        )
+    ),
     all(feature = "lesson07-user-mode", feature = "lesson08-syscalls"),
     all(feature = "lesson07-user-mode", feature = "lesson09-exit"),
     all(feature = "lesson08-syscalls", feature = "lesson09-exit")
 ))]
-compile_error!("lesson07-user-mode, lesson08-syscalls, and lesson09-exit are mutually exclusive checkpoints");
+compile_error!(
+    "lesson07-user-mode, lesson08-syscalls, and lesson09-exit are mutually exclusive checkpoints"
+);
 
 unsafe extern "C" {
     fn enter_user_mode(user_sp: usize, entry: usize, sstatus: usize, trap_stack_top: usize);
@@ -335,9 +345,10 @@ fn validate_user_trap(frame: &TrapFrame, code_start: usize, code_end: usize) -> 
     let cause_code = frame.scause & !interrupt_bit;
     let origin_spp = (frame.sstatus & SSTATUS_SPP) >> 8;
     let frame_address = frame as *const TrapFrame as usize;
-    let frame_end = frame_address.checked_add(TRAP_FRAME_SIZE).unwrap_or(usize::MAX);
-    let frame_in_trap_stack =
-        trap_stack.start <= frame_address && frame_end <= trap_stack.end;
+    let frame_end = frame_address
+        .checked_add(TRAP_FRAME_SIZE)
+        .unwrap_or(usize::MAX);
+    let frame_in_trap_stack = trap_stack.start <= frame_address && frame_end <= trap_stack.end;
     let user_sp_ok = user_stack.contains(frame.x[2]) && frame.x[2] & 0xf == 0;
     let sepc_in_user_code = code_start <= frame.sepc && frame.sepc < code_end;
     let kernel_stvec_restored = read_stvec() == kernel_trap_entry_address();
@@ -352,10 +363,7 @@ fn validate_user_trap(frame: &TrapFrame, code_start: usize, code_end: usize) -> 
     {
         panic!(
             "unexpected user trap: spp={} interrupt={} cause={} sepc={:#x}",
-            origin_spp,
-            is_interrupt,
-            cause_code,
-            frame.sepc
+            origin_spp, is_interrupt, cause_code, frame.sepc
         );
     }
 
@@ -389,7 +397,11 @@ pub(crate) fn run_lesson07(pid: u64) -> ! {
     let process = prepare_process(pid, &program, user_stack, trap_stack);
     let runtime = process.user_runtime();
 
-    crate::println!("[user setup] pid={} program={}", process.id(), process.program().name());
+    crate::println!(
+        "[user setup] pid={} program={}",
+        process.id(),
+        process.program().name()
+    );
     crate::println!(
         "[user setup] code=[{:#x}, {:#x})",
         process.program().code_range().start,
@@ -427,9 +439,10 @@ fn handle_lesson07(frame: &TrapFrame) -> ! {
     let cause_code = frame.scause & !interrupt_bit;
     let origin_spp = (frame.sstatus & SSTATUS_SPP) >> 8;
     let frame_address = frame as *const TrapFrame as usize;
-    let frame_end = frame_address.checked_add(TRAP_FRAME_SIZE).unwrap_or(usize::MAX);
-    let frame_in_trap_stack =
-        trap_stack.start <= frame_address && frame_end <= trap_stack.end;
+    let frame_end = frame_address
+        .checked_add(TRAP_FRAME_SIZE)
+        .unwrap_or(usize::MAX);
+    let frame_in_trap_stack = trap_stack.start <= frame_address && frame_end <= trap_stack.end;
     let user_sp_ok = user_stack.contains(frame.x[2]) && frame.x[2] & 0xf == 0;
     let sepc_in_user_code = code_start <= frame.sepc && frame.sepc < code_end;
     let kernel_stvec_restored = read_stvec() == kernel_trap_entry_address();
@@ -485,7 +498,11 @@ pub(crate) fn run_lesson08(pid: u64) -> ! {
     let process = prepare_process(pid, &program, user_stack, trap_stack);
     let runtime = process.user_runtime();
 
-    crate::println!("[syscall setup] pid={} program={}", process.id(), process.program().name());
+    crate::println!(
+        "[syscall setup] pid={} program={}",
+        process.id(),
+        process.program().name()
+    );
     crate::println!("[syscall setup] abi=a7:number,a0:arg0/result");
     crate::println!("[syscall setup] spp=0");
     crate::println!("[syscall setup] sepc={:#x}", runtime.context.sepc);
@@ -499,7 +516,10 @@ fn handle_lesson08(frame: &mut TrapFrame) {
     validate_user_trap(frame, code_start, code_end);
 
     if !user08_known_ecall(frame.sepc) {
-        panic!("lesson 08 trapped at an unexpected user PC {:#x}", frame.sepc);
+        panic!(
+            "lesson 08 trapped at an unexpected user PC {:#x}",
+            frame.sepc
+        );
     }
 
     let number = frame.x[17];
@@ -544,8 +564,7 @@ fn record_trap_frame(address: usize) {
     } else if expected != address {
         panic!(
             "trap frame drifted: first={:#x} current={:#x}",
-            expected,
-            address
+            expected, address
         );
     }
 }
@@ -590,7 +609,10 @@ pub(crate) fn run_lesson09(first_pid: u64) -> ! {
         ProcessState::Exited(7) => crate::println!("process state=Exited(7)"),
         _ => panic!("exit-demo process did not commit Exited(7)"),
     }
-    crate::println!("kernel_sp_returned={}", manager_sp_before == manager_sp_after);
+    crate::println!(
+        "kernel_sp_returned={}",
+        manager_sp_before == manager_sp_after
+    );
 
     // 现在已经回到 management/boot stack，才允许清理曾经使用的 user/trap stacks。
     clear_runtime_stacks(user_stack, trap_stack);
@@ -598,9 +620,12 @@ pub(crate) fn run_lesson09(first_pid: u64) -> ! {
     // B 次：连续运行 100 个全新 Process 实例。它们共享同一 Program 和固定栈地址，
     // 但 PID/state/context 每次重新构造。
     let (stress_start, stress_entry, stress_end) = user09_stress_code_addresses();
-    let stress_program = Program::from_linked("exit-stress", stress_entry, stress_start, stress_end);
+    let stress_program =
+        Program::from_linked("exit-stress", stress_entry, stress_start, stress_end);
 
-    let stress_first_pid = first_pid.checked_add(1).unwrap_or_else(|| panic!("PID overflow"));
+    let stress_first_pid = first_pid
+        .checked_add(1)
+        .unwrap_or_else(|| panic!("PID overflow"));
     let manager_sp_baseline = current_sp();
     let mut kernel_sp_stable = manager_sp_before == manager_sp_after;
     let mut no_running = true;
@@ -663,7 +688,10 @@ fn handle_lesson09(frame: &mut TrapFrame) -> usize {
     } else if in_stress {
         (stress_start, stress_end)
     } else {
-        panic!("lesson 09 sepc outside supported user programs: {:#x}", frame.sepc);
+        panic!(
+            "lesson 09 sepc outside supported user programs: {:#x}",
+            frame.sepc
+        );
     };
 
     let frame_address = validate_user_trap(frame, code_start, code_end);
@@ -707,6 +735,12 @@ fn handle_lesson09(frame: &mut TrapFrame) -> usize {
 pub extern "C" fn rust_user_trap_handler(frame: *mut TrapFrame) -> usize {
     let frame = unsafe { &mut *frame };
 
+    #[cfg(feature = "scheduling")]
+    return crate::scheduler::handle(frame);
+
+    #[cfg(feature = "lesson10-user-errors")]
+    return lesson10::handle(frame);
+
     #[cfg(feature = "lesson09-exit")]
     return handle_lesson09(frame);
 
@@ -721,3 +755,20 @@ pub extern "C" fn rust_user_trap_handler(frame: *mut TrapFrame) -> usize {
 
     panic!("unexpected user trap without an active user-mode checkpoint");
 }
+
+#[cfg(feature = "lesson10-user-errors")]
+#[path = "user10.rs"]
+mod lesson10;
+#[cfg(feature = "lesson10-user-errors")]
+pub(crate) use lesson10::run as run_lesson10;
+
+#[cfg(all(
+    feature = "scheduling",
+    any(
+        feature = "lesson07-user-mode",
+        feature = "lesson08-syscalls",
+        feature = "lesson09-exit",
+        feature = "lesson10-user-errors"
+    )
+))]
+compile_error!("scheduling and single-process user checkpoints are mutually exclusive");

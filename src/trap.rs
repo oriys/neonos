@@ -50,6 +50,7 @@ const SEPC: usize = 33 * SLOT_SIZE;
 const SCAUSE: usize = 34 * SLOT_SIZE;
 const STVAL: usize = 35 * SLOT_SIZE;
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct TrapFrame {
     pub x: [usize; 32],
@@ -207,8 +208,7 @@ pub fn init() {
     if actual != entry {
         panic!(
             "stvec readback mismatch: expected={:#x} actual={:#x}",
-            entry,
-            actual
+            entry, actual
         );
     }
 

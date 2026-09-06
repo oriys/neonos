@@ -185,7 +185,10 @@ pub fn report_and_validate() {
     // 正常启动以及“先写 probe 再清零”的正例都必须看到 0。
     // 只有 lesson04-skip-bss-clear 负例显式关闭这条启动契约。
     if !cfg!(feature = "lesson04-skip-bss-clear") && probe != 0 {
-        panic!("ordinary BSS was not zeroed before Rust: probe={:#x}", probe);
+        panic!(
+            "ordinary BSS was not zeroed before Rust: probe={:#x}",
+            probe
+        );
     }
 
     crate::println!("memory layout ok");
