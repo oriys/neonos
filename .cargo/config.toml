@@ -1,13 +1,42 @@
+# `[build]` 是 Cargo 的全局构建配置区域。
 [build]
+
+# `target` 指定默认编译目标。
+# `riscv64gc`：64 位 RISC-V，带常用扩展；
+# `unknown`：不指定厂商；
+# `none`：目标环境没有操作系统；
+# `elf`：最终生成 ELF 格式文件。
+# 这行意味着以后直接运行 `cargo build`，默认就是给这个裸机 RISC-V 目标编译。
 target = "riscv64gc-unknown-none-elf"
 
+# 这一段只针对上面这个 RISC-V target 生效。
 [target.riscv64gc-unknown-none-elf]
+
+# `rustflags` 给 rustc 额外传参数。
+# `-C` 表示传入 codegen（代码生成）相关选项。
+# `link-arg=-Tlinker.ld` 表示再把 `-Tlinker.ld` 传给链接器，
+# 让链接器使用仓库根目录下的 `linker.ld` 来决定内核的内存布局和入口地址。
 rustflags = ["-C", "link-arg=-Tlinker.ld"]
+
+# `runner` 告诉 Cargo：`cargo run` 编译完成以后，不是直接在当前 macOS/Linux 上执行这个 ELF，
+# 而是用下面这条 QEMU 命令启动它。
 runner = [
+    # 启动 64 位 RISC-V 的 QEMU 系统模拟器。
     "qemu-system-riscv64",
+
+    # `-machine virt`：使用 QEMU 提供的通用 RISC-V 虚拟开发板。
     "-machine", "virt",
+
+    # `-bios default`：使用 QEMU 自带的默认 OpenSBI 固件。
+    # OpenSBI 会先启动，然后再把控制权交给我们的内核。
     "-bios", "default",
+
+    # `-nographic`：不要弹图形窗口，把串口输出直接显示在当前终端。
     "-nographic",
+
+    # `-smp 1`：只模拟 1 个 CPU hart（可以先理解成 1 个 CPU 核心）。
     "-smp", "1",
+
+    # `-kernel` 后面 Cargo 会自动追加刚刚编译出来的 neonos ELF 路径。
     "-kernel",
 ]
