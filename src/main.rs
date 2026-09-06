@@ -11,29 +11,22 @@ mod memory;
 // 第 05 课：S-mode trap 入口、TrapFrame 与异常诊断。
 mod trap;
 
+// 第 06 课：Program / Process / ProcessState 最小模型。
+mod process;
+
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
-// 这两个编译期常量只服务于第 04 课的自动实验：
-// - 默认都是 0，不改变正常启动语义；
-// - probe 模式会在清零前故意污染 8-byte BSS；
-// - skip 模式会故意跳过清零，构造负例。
 const LESSON04_BSS_PROBE_ENABLED: usize = cfg!(feature = "lesson04-bss-probe") as usize;
 const LESSON04_SKIP_BSS_CLEAR: usize = cfg!(feature = "lesson04-skip-bss-clear") as usize;
 
-// 最早期启动代码必须在调用普通 Rust 函数前完成两个最低运行条件：
-// 1. 准备一个不会被后续 BSS 清零覆盖的启动栈；
-// 2. 主动把普通 [sbss, ebss) 清零。
 global_asm!(
     r#"
     .section .text.entry
     .globl _start
 _start:
-    # 先建立启动栈。linker.ld 已把它从普通 BSS 独立成 .boot_stack。
     la sp, boot_stack_top
 
-    # 第 04 课正/负对照探针。
-    # 默认 probe_enabled=0，因此正常构建不会故意写脏 BSS。
     li t2, {probe_enabled}
     beqz t2, 2f
     la t0, bss_probe
@@ -41,12 +34,9 @@ _start:
     sd t1, 0(t0)
 
 2:
-    # 负例 feature 仅用于证明“如果不清零，probe 的非零值会保留下来”。
     li t2, {skip_bss_clear}
     bnez t2, 4f
 
-    # 按字节清普通 BSS 半开区间 [sbss, ebss)。
-    # 循环只使用临时寄存器，不依赖 Rust 调用栈。
     la t0, sbss
     la t1, ebss
 3:
@@ -56,22 +46,18 @@ _start:
     j 3b
 
 4:
-    # 到这里以后，Rust 可以依赖普通 BSS 已满足零初始化契约。
     call rust_main
 
 1:
     wfi
     j 1b
 
-    # 启动栈输入 section；linker.ld 会把它单独收进 .boot_stack (NOLOAD)。
     .section .bss.stack, "aw", @nobits
     .align 12
 boot_stack:
     .space 65536
 boot_stack_top:
 
-    # 第 04 课 BSS 探针是真正的 8-byte 普通 BSS。
-    # linker.ld 的 .bss wildcard 会收集它，因此它必须落在 [sbss, ebss) 内。
     .section .bss.probe, "aw", @nobits
     .balign 8
     .globl bss_probe
@@ -92,19 +78,20 @@ pub extern "C" fn rust_main() -> ! {
     crate::print!("left");
     crate::println!(" right");
 
-    // 第 04 课：用真实 linker symbols 和当前 sp 验证内存布局。
+    // 第 04 课：真实链接布局与 BSS 启动契约。
     memory::report_and_validate();
 
-    // 第 05 课 B 次：先只安装 stvec Direct 入口并保持普通 S interrupt 关闭。
-    // 默认构建到这里会打印 `trap ready`，但不会主动制造异常。
+    // 第 05 课：默认只安装 stvec；故障 feature 会在下一行之后直接进入 trap 并停住。
     trap::init();
 
-    // 第 05 课 C 次的受控负例由 feature 打开。
-    // 独立汇编函数的第一条指令就是非法编码；trap handler 会打印事实后停住。
     #[cfg(feature = "lesson05-illegal-trap")]
     trap::trigger_lesson05();
 
-    // 第 03 课故障注入仍然保留，保证新增 trap 初始化没有破坏 Rust panic 路径。
+    // 第 06 课仍然只是 Rust 内核里的模型实验，因此明确输出 `[model]`。
+    // 它不会执行用户指令，也不会使用 sret。
+    process::run_lesson06_model();
+
+    // 第 03 课的故障注入回归仍然保留。
     #[cfg(feature = "lesson03-panic")]
     {
         lesson03_deliberate_panic();
